@@ -1,0 +1,48 @@
+name: lecture_assistant
+description: "Ассистент лекций - запись, транскрибация и умные конспекты"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.9.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+  
+  # HTTP client
+  dio: ^5.4.0
+  
+  # State management
+  flutter_bloc: ^8.1.4
+  equatable: ^2.0.5
+  
+  # Audio recording
+  record: ^5.1.0
+  
+  # Audio playback
+  just_audio: ^0.9.36
+  
+  # File handling
+  path_provider: ^2.1.2
+  path: ^1.9.0
+  
+  # Permissions
+  permission_handler: ^11.3.0
+  
+  # UI utilities
+  intl: ^0.19.0
+  shimmer: ^3.0.0
+  
+  # Local storage
+  shared_preferences: ^2.2.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true

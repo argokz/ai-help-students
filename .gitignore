@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+.env
+*.egg-info/
+dist/
+build/
+
+# Backend data
+backend/data/
+*.db
+*.sqlite3
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Flutter
+frontend/.dart_tool/
+frontend/.packages
+frontend/.pub-cache/
+frontend/.pub/
+frontend/build/
+frontend/.flutter-plugins
+frontend/.flutter-plugins-dependencies
+frontend/*.iml
+frontend/.metadata
+frontend/android/.gradle/
+frontend/android/local.properties
+frontend/android/app/debug/
+frontend/android/app/profile/
+frontend/android/app/release/
+frontend/ios/Pods/
+frontend/ios/.symlinks/
+frontend/ios/Flutter/Flutter.framework
+frontend/ios/Flutter/Flutter.podspec
+frontend/ios/Flutter/App.framework
+frontend/ios/Flutter/engine/
+frontend/ios/ServiceDefinitions.json
+frontend/ios/Runner/GeneratedPluginRegistrant.*
+
+# Logs
+*.log
+logs/
+
+# Test
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Secrets (keep .env.example, ignore actual .env)
+.env
+!.env.example
