@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     
     # App settings
     app_name: str = "Lecture Assistant API"
-    debug: bool = True
+    app_debug: bool = True  # Renamed to avoid conflict with system DEBUG env var
     
     # API settings
     api_prefix: str = "/api"
@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        extra = "ignore"  # Ignore extra env vars like DEBUG
 
 
 settings = Settings()
