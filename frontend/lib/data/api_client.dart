@@ -1,21 +1,18 @@
 import 'dart:io';
 import 'package:dio/dio.dart';
+import '../core/config/app_config.dart';
 import '../models/lecture.dart';
 import '../models/transcript.dart';
 import '../models/summary.dart';
 import '../models/chat_message.dart';
 
 class ApiClient {
-  static const String _baseUrl = 'http://10.0.2.2:8000/api'; // Android emulator
-  // For physical device, use your computer's IP address
-  // static const String _baseUrl = 'http://192.168.1.x:8000/api';
-  
   final Dio _dio;
 
   ApiClient() : _dio = Dio(BaseOptions(
-    baseUrl: _baseUrl,
-    connectTimeout: const Duration(seconds: 30),
-    receiveTimeout: const Duration(seconds: 60),
+    baseUrl: AppConfig.apiBaseUrl,
+    connectTimeout: Duration(seconds: AppConfig.connectTimeout),
+    receiveTimeout: Duration(seconds: AppConfig.receiveTimeout),
     headers: {
       'Content-Type': 'application/json',
     },

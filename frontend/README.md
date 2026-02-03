@@ -27,14 +27,17 @@ flutter pub get
 
 ### 2. Настройка API URL
 
-Отредактируйте `lib/data/api_client.dart`:
+Отредактируйте `lib/core/config/app_config.dart`:
 
 ```dart
-// Для эмулятора Android
-static const String _baseUrl = 'http://10.0.2.2:8000/api';
-
-// Для физического устройства - используйте IP компьютера
-static const String _baseUrl = 'http://192.168.1.x:8000/api';
+class AppConfig {
+  // Production server
+  static const String apiBaseUrl = 'https://itwin.kz/ai-api/api';
+  
+  // Для локальной разработки (раскомментируйте нужный):
+  // static const String apiBaseUrl = 'http://10.0.2.2:8000/api';  // Android emulator
+  // static const String apiBaseUrl = 'http://localhost:8000/api'; // iOS simulator
+}
 ```
 
 ### 3. Запуск
