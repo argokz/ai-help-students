@@ -1,0 +1,135 @@
+import 'dart:async';
+import 'dart:io';
+import 'package:flutter/foundation.dart';
+import '../models/upload_task.dart' show UploadTask, UploadTaskStatus;
+import 'api_client.dart';
+
+/// Глобальная очередь загрузок. Запускает загрузку в фоне, обновляет прогресс,
+/// после успешной отправки опрашивает статус лекции до completed/failed.
+class UploadQueueNotifier extends ChangeNotifier {
+  final List<UploadTask> _tasks = [];
+  final ApiClient _api = apiClient;
+  static const _pollInterval = Duration(seconds: 5);
+  final Map<String, Timer> _pollTimers = {};
+
+  List<UploadTask> get tasks => List.unmodifiable(_tasks);
+
+  /// Добавить задачу и сразу запустить загрузку в фоне.
+  void addTask({
+    required String filePath,
+    String? title,
+    String? language,
+  }) {
+    final id = '${DateTime.now().millisecondsSinceEpoch}_${filePath.hashCode}';
+    final task = UploadTask(
+      id: id,
+      filePath: filePath,
+      title: title,
+      language: language,
+    );
+    _tasks.add(task);
+    notifyListeners();
+    _runUpload(task);
+  }
+
+  void _runUpload(UploadTask task) async {
+    final file = File(task.filePath);
+    if (!file.existsSync()) {
+      _setFailed(task, 'Файл не найден');
+      return;
+    }
+
+    void onProgress(int sent, int total) {
+      if (total > 0) {
+        task.uploadProgress = sent / total;
+        notifyListeners();
+      }
+    }
+
+    try {
+      final lecture = await _api.uploadLecture(
+        audioFile: file,
+        title: task.title,
+        language: task.language,
+        onSendProgress: onProgress,
+      );
+
+      task.uploadProgress = 1.0;
+      task.lectureId = lecture.id;
+      task.status = UploadTaskStatus.processing;
+      task.errorMessage = null;
+      notifyListeners();
+
+      _startPolling(task);
+    } catch (e, st) {
+      task.status = UploadTaskStatus.failed;
+      task.errorMessage = e.toString();
+      notifyListeners();
+      debugPrint('Upload failed: $e $st');
+    }
+  }
+
+  void _startPolling(UploadTask task) {
+    final lectureId = task.lectureId;
+    if (lectureId == null) return;
+
+    void poll() async {
+      try {
+        final lecture = await _api.getLecture(lectureId);
+        if (lecture.status == 'completed') {
+          _pollTimers[task.id]?.cancel();
+          _pollTimers.remove(task.id);
+          task.status = UploadTaskStatus.completed;
+          notifyListeners();
+          _removeTaskLater(task);
+          return;
+        }
+        if (lecture.status == 'failed') {
+          _pollTimers[task.id]?.cancel();
+          _pollTimers.remove(task.id);
+          task.status = UploadTaskStatus.failed;
+          task.errorMessage = 'Ошибка обработки на сервере';
+          notifyListeners();
+          return;
+        }
+      } catch (_) {}
+    }
+
+    poll();
+    final timer = Timer.periodic(_pollInterval, (_) => poll());
+    _pollTimers[task.id] = timer;
+  }
+
+  void _removeTaskLater(UploadTask task) {
+    Future.delayed(const Duration(milliseconds: 500), () {
+      _tasks.remove(task);
+      notifyListeners();
+    });
+  }
+
+  void _setFailed(UploadTask task, String message) {
+    task.status = UploadTaskStatus.failed;
+    task.errorMessage = message;
+    notifyListeners();
+  }
+
+  /// Повторить загрузку для задачи в состоянии failed.
+  void retry(UploadTask task) {
+    if (!task.canRetry) return;
+    task.uploadProgress = 0.0;
+    task.status = UploadTaskStatus.uploading;
+    task.errorMessage = null;
+    task.lectureId = null;
+    notifyListeners();
+    _runUpload(task);
+  }
+
+  void remove(UploadTask task) {
+    _pollTimers[task.id]?.cancel();
+    _pollTimers.remove(task.id);
+    _tasks.remove(task);
+    notifyListeners();
+  }
+}
+
+final uploadQueue = UploadQueueNotifier();

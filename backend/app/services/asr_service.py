@@ -1,8 +1,6 @@
 """ASR service using faster-whisper for speech-to-text."""
 import asyncio
 from typing import Optional
-from functools import lru_cache
-
 from ..config import settings
 
 
@@ -74,16 +72,18 @@ class ASRService:
         
         whisper_lang = lang_map.get(language, language) if language else None
         
-        # Transcribe
+        # Transcribe (параметры ускорения: beam_size=1, condition_on_previous_text=False)
         segments_generator, info = self.model.transcribe(
             audio_path,
             language=whisper_lang,
             task="transcribe",
-            vad_filter=True,  # Voice activity detection for better accuracy
+            beam_size=settings.whisper_beam_size,
+            condition_on_previous_text=settings.whisper_condition_on_previous_text,
+            vad_filter=True,
             vad_parameters=dict(
                 min_silence_duration_ms=500,
             ),
-            word_timestamps=False,  # Segment-level is enough for MVP
+            word_timestamps=False,
         )
         
         # Collect segments

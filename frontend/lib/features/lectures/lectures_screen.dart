@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import '../../models/lecture.dart';
+import '../../models/upload_task.dart';
 import '../../data/api_client.dart';
 import '../../data/auth_repository.dart';
+import '../../data/upload_queue.dart';
 import '../../app/routes.dart';
 
 class LecturesScreen extends StatefulWidget {
@@ -63,7 +65,23 @@ class _LecturesScreenState extends State<LecturesScreen> {
           ),
         ],
       ),
-      body: _buildBody(),
+      body: ListenableBuilder(
+        listenable: uploadQueue,
+        builder: (context, _) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (uploadQueue.tasks.isNotEmpty)
+                _UploadTasksSection(
+                  tasks: uploadQueue.tasks,
+                  onRetry: uploadQueue.retry,
+                  onDismiss: uploadQueue.remove,
+                ),
+              Expanded(child: _buildBody()),
+            ],
+          );
+        },
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () {
           Navigator.pushNamed(context, AppRoutes.recording);
@@ -394,6 +412,127 @@ class _FeatureChip extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _UploadTasksSection extends StatelessWidget {
+  final List<UploadTask> tasks;
+  final void Function(UploadTask) onRetry;
+  final void Function(UploadTask) onDismiss;
+
+  const _UploadTasksSection({
+    required this.tasks,
+    required this.onRetry,
+    required this.onDismiss,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      elevation: 1,
+      child: SafeArea(
+        bottom: false,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Text(
+                'Загрузки',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+            ...tasks.map((task) => _UploadTaskCard(
+                  task: task,
+                  onRetry: () => onRetry(task),
+                  onDismiss: () => onDismiss(task),
+                )),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _UploadTaskCard extends StatelessWidget {
+  final UploadTask task;
+  final VoidCallback onRetry;
+  final VoidCallback onDismiss;
+
+  const _UploadTaskCard({
+    required this.task,
+    required this.onRetry,
+    required this.onDismiss,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final title = task.title?.isNotEmpty == true ? task.title! : 'Без названия';
+
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    style: theme.textTheme.titleSmall,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (task.isFailed)
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 20),
+                    onPressed: onDismiss,
+                    tooltip: 'Убрать из списка',
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (task.isUploading) ...[
+              LinearProgressIndicator(value: task.uploadProgress),
+              const SizedBox(height: 4),
+              Text(
+                'Загрузка ${task.uploadPercent}%',
+                style: theme.textTheme.bodySmall,
+              ),
+            ] else if (task.isProcessing) ...[
+              const LinearProgressIndicator(),
+              const SizedBox(height: 4),
+              Text(
+                'Обработка на сервере...',
+                style: theme.textTheme.bodySmall,
+              ),
+            ] else if (task.isFailed) ...[
+              Text(
+                task.errorMessage ?? 'Ошибка',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.error,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 8),
+              FilledButton.tonal(
+                onPressed: onRetry,
+                child: const Text('Повторить'),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

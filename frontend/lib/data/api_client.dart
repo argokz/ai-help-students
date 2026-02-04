@@ -86,10 +86,12 @@ class ApiClient {
     return Lecture.fromJson(response.data as Map<String, dynamic>);
   }
 
+  /// [onSendProgress] вызывается с (отправлено байт, всего байт).
   Future<Lecture> uploadLecture({
     required File audioFile,
     String? title,
     String? language,
+    void Function(int sent, int total)? onSendProgress,
   }) async {
     final formData = FormData.fromMap({
       'file': await MultipartFile.fromFile(
@@ -106,6 +108,7 @@ class ApiClient {
       options: Options(
         headers: {'Content-Type': 'multipart/form-data'},
       ),
+      onSendProgress: onSendProgress,
     );
 
     return Lecture.fromJson(response.data as Map<String, dynamic>);

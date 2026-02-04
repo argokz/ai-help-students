@@ -45,9 +45,14 @@ async def upload_lecture(
     lecture_id = str(uuid.uuid4())
     audio_path = settings.audio_dir / f"{lecture_id}{file_ext}"
 
+    # Stream to disk by chunks — меньше памяти и быстрее для больших файлов
+    chunk_size = 1024 * 1024  # 1 MiB
     async with aiofiles.open(audio_path, "wb") as f:
-        content = await file.read()
-        await f.write(content)
+        while True:
+            chunk = await file.read(chunk_size)
+            if not chunk:
+                break
+            await f.write(chunk)
 
     lecture_title = title or file.filename or f"Лекция {datetime.now().strftime('%Y-%m-%d %H:%M')}"
     lecture_data = {

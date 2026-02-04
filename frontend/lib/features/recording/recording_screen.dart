@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
-import '../../data/api_client.dart';
+import '../../data/upload_queue.dart';
 import '../../app/routes.dart';
 
 class RecordingScreen extends StatefulWidget {
@@ -18,7 +18,6 @@ class _RecordingScreenState extends State<RecordingScreen> {
   final AudioRecorder _recorder = AudioRecorder();
   bool _isRecording = false;
   bool _isPaused = false;
-  bool _isUploading = false;
   String? _recordingPath;
   Duration _duration = Duration.zero;
   Timer? _timer;
@@ -147,7 +146,7 @@ class _RecordingScreenState extends State<RecordingScreen> {
           FilledButton(
             onPressed: () {
               Navigator.of(context).pop();
-              _uploadRecording();
+              _enqueueAndGoToLectures();
             },
             child: const Text('Загрузить'),
           ),
@@ -169,40 +168,30 @@ class _RecordingScreenState extends State<RecordingScreen> {
     });
   }
 
-  Future<void> _uploadRecording() async {
+  /// Добавляет запись в очередь загрузки и переходит к списку лекций.
+  /// Загрузка идёт в фоне; можно сразу записывать следующую лекцию.
+  void _enqueueAndGoToLectures() {
     if (_recordingPath == null) return;
 
-    setState(() {
-      _isUploading = true;
-    });
+    uploadQueue.addTask(
+      filePath: _recordingPath!,
+      title: _titleController.text.isEmpty ? null : _titleController.text,
+      language: _selectedLanguage == 'auto' ? null : _selectedLanguage,
+    );
 
-    try {
-      final file = File(_recordingPath!);
-      final lecture = await apiClient.uploadLecture(
-        audioFile: file,
-        title: _titleController.text.isEmpty ? null : _titleController.text,
-        language: _selectedLanguage == 'auto' ? null : _selectedLanguage,
+    _recordingPath = null;
+    _duration = Duration.zero;
+    _titleController.clear();
+    _selectedLanguage = 'auto';
+    setState(() {});
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Добавлено в очередь. Загрузка в фоне. Можно записать ещё.'),
+        ),
       );
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Лекция загружена! Начинается обработка...')),
-        );
-        Navigator.of(context).pushReplacementNamed(
-          AppRoutes.lectureDetail,
-          arguments: lecture.id,
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Ошибка загрузки: $e')),
-        );
-      }
-    } finally {
-      setState(() {
-        _isUploading = false;
-      });
+      Navigator.of(context).pushReplacementNamed(AppRoutes.lectures);
     }
   }
 
@@ -226,18 +215,9 @@ class _RecordingScreenState extends State<RecordingScreen> {
         title: const Text('Запись лекции'),
       ),
       body: Center(
-        child: _isUploading
-            ? const Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 16),
-                  Text('Загрузка...'),
-                ],
-              )
-            : Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
                   // Timer display
                   Container(
                     padding: const EdgeInsets.symmetric(
@@ -306,7 +286,7 @@ class _RecordingScreenState extends State<RecordingScreen> {
                     style: Theme.of(context).textTheme.bodyLarge,
                   ),
                 ],
-              ),
+        ),
       ),
     );
   }

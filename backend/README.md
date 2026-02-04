@@ -114,8 +114,16 @@ backend/
 | `GEMINI_MODEL` | Модель Gemini | `gemini-2.5-flash` |
 | `OPENAI_API_KEY` | API ключ OpenAI (опционально) | - |
 | `OPENAI_MODEL` | Модель OpenAI | `gpt-4o-mini` |
-| `WHISPER_MODEL` | Модель Whisper | `medium` |
+| `WHISPER_MODEL` | Модель Whisper (base/small/medium/large-v3) | `medium` |
 | `WHISPER_DEVICE` | Устройство (cpu/cuda) | `cpu` |
+| `WHISPER_COMPUTE_TYPE` | Точность на GPU (float16/int8) | `int8` |
+| `WHISPER_BEAM_SIZE` | Размер beam (1 — быстрее, 5 — качество) | `1` |
+| `WHISPER_CONDITION_ON_PREVIOUS_TEXT` | Учёт предыдущего текста (False быстрее) | `false` |
+
+### Ускорение загрузки и обработки
+
+- **Загрузка**: файл пишется на диск чанками (стриминг), без загрузки целиком в память.
+- **ASR быстрее**: в `.env` задайте `WHISPER_MODEL=small` или `base`, при наличии GPU — `WHISPER_DEVICE=cuda` и `WHISPER_COMPUTE_TYPE=float16`. Уже включены `beam_size=1` и `condition_on_previous_text=False` для скорости.
 
 ## Смена LLM провайдера
 
