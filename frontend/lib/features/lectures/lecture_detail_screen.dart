@@ -1,7 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:just_audio/just_audio.dart';
+import 'package:path_provider/path_provider.dart';
 import '../../models/lecture.dart';
 import '../../data/api_client.dart';
+import '../../data/auth_repository.dart';
 import '../../app/routes.dart';
 
 class LectureDetailScreen extends StatefulWidget {
@@ -21,17 +24,157 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
   bool _isLoading = true;
   String? _error;
   Timer? _pollTimer;
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  StreamSubscription<Duration>? _positionSub;
+  StreamSubscription<Duration?>? _durationSub;
+  StreamSubscription<PlayerState>? _playerStateSub;
+  Duration _position = Duration.zero;
+  Duration? _duration;
 
   @override
   void initState() {
     super.initState();
     _loadLecture();
+    _positionSub = _audioPlayer.positionStream.listen((p) {
+      if (mounted) setState(() => _position = p);
+    });
+    _durationSub = _audioPlayer.durationStream.listen((d) {
+      if (mounted) setState(() => _duration = d);
+    });
+    _playerStateSub = _audioPlayer.playerStateStream.listen((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
   void dispose() {
     _pollTimer?.cancel();
+    _positionSub?.cancel();
+    _durationSub?.cancel();
+    _playerStateSub?.cancel();
+    _audioPlayer.dispose();
     super.dispose();
+  }
+
+  Future<void> _playPauseAudio() async {
+    if (_lecture == null) return;
+    try {
+      if (_audioPlayer.playing) {
+        await _audioPlayer.pause();
+      } else {
+        final token = await authRepository.getToken();
+        if (token == null || token.isEmpty) return;
+        final url = ApiClient.lectureAudioUrl(_lecture!.id);
+        await _audioPlayer.setUrl(url, headers: {'Authorization': 'Bearer $token'});
+        await _audioPlayer.play();
+      }
+      if (mounted) setState(() {});
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Ошибка воспроизведения: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _showEditSubjectGroupDialog() async {
+    if (_lecture == null) return;
+    final subjectController = TextEditingController(text: _lecture!.subject);
+    final groupController = TextEditingController(text: _lecture!.groupName);
+    final result = await showDialog<Map<String, String>>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Предмет и группа'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: subjectController,
+                decoration: const InputDecoration(
+                  labelText: 'Предмет',
+                  hintText: 'Например: Математика',
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: groupController,
+                decoration: const InputDecoration(
+                  labelText: 'Группа',
+                  hintText: 'Например: ИС-21',
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, {
+                'subject': subjectController.text.trim(),
+                'groupName': groupController.text.trim(),
+              }),
+              child: const Text('Сохранить'),
+            ),
+          ],
+        );
+      },
+    );
+    subjectController.dispose();
+    groupController.dispose();
+    if (result != null) {
+      await _updateSubjectGroup(
+        subject: result['subject'] ?? '',
+        groupName: result['groupName'] ?? '',
+      );
+    }
+  }
+
+  Future<void> _updateSubjectGroup({
+    String? subject,
+    String? groupName,
+  }) async {
+    if (_lecture == null) return;
+    try {
+      final updated = await apiClient.updateLecture(
+        _lecture!.id,
+        subject: subject,
+        groupName: groupName,
+      );
+      setState(() => _lecture = updated);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Ошибка: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _downloadAudio() async {
+    if (_lecture == null) return;
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final name = _lecture!.filename.isNotEmpty
+          ? _lecture!.filename
+          : 'lecture_${_lecture!.id}.m4a';
+      final savePath = '${dir.path}/$name';
+      await apiClient.downloadLectureAudio(_lecture!.id, savePath);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Сохранено: $name')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Ошибка скачивания: $e')),
+        );
+      }
+    }
   }
 
   Future<void> _loadLecture() async {
@@ -173,6 +316,92 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
                     ],
                   ),
                 ],
+                if (lecture.subject != null || lecture.groupName != null) ...[
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 4,
+                    children: [
+                      if (lecture.subject != null && lecture.subject!.isNotEmpty)
+                        Chip(label: Text(lecture.subject!)),
+                      if (lecture.groupName != null && lecture.groupName!.isNotEmpty)
+                        Chip(label: Text(lecture.groupName!)),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 8),
+                TextButton.icon(
+                  onPressed: _showEditSubjectGroupDialog,
+                  icon: const Icon(Icons.edit, size: 18),
+                  label: const Text('Предмет / Группа'),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // Audio playback
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.audiotrack, color: Theme.of(context).colorScheme.primary),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Аудио лекции',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.download),
+                      tooltip: 'Скачать',
+                      onPressed: _downloadAudio,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    IconButton.filled(
+                      onPressed: _playPauseAudio,
+                      icon: Icon(_audioPlayer.playing ? Icons.pause : Icons.play_arrow),
+                      iconSize: 32,
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (_duration != null && _duration!.inMilliseconds > 0)
+                            SliderTheme(
+                              data: SliderTheme.of(context).copyWith(
+                                trackHeight: 3,
+                                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                                overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                              ),
+                              child: Slider(
+                                value: _position.inMilliseconds.clamp(0, _duration!.inMilliseconds).toDouble(),
+                                max: _duration!.inMilliseconds.toDouble(),
+                                onChanged: (v) async {
+                                  await _audioPlayer.seek(Duration(milliseconds: v.round()));
+                                },
+                              ),
+                            ),
+                          Text(
+                            '${_formatDuration(_position)} / ${_duration != null ? _formatDuration(_duration!) : lecture.durationText}',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -229,6 +458,13 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
         ),
       ],
     );
+  }
+
+  String _formatDuration(Duration d) {
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    if (d.inHours > 0) return '${d.inHours}:$m:$s';
+    return '$m:$s';
   }
 
   String _languageName(String code) {

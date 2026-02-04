@@ -7,6 +7,7 @@ import '../features/recording/recording_screen.dart';
 import '../features/transcript/transcript_screen.dart';
 import '../features/summary/summary_screen.dart';
 import '../features/chat/chat_screen.dart';
+import '../features/chat/global_chat_screen.dart';
 
 class AppRoutes {
   static const String login = '/';
@@ -17,6 +18,7 @@ class AppRoutes {
   static const String transcript = '/transcript';
   static const String summary = '/summary';
   static const String chat = '/chat';
+  static const String globalChat = '/global-chat';
 
   static Route<dynamic> generateRoute(RouteSettings settings) {
     switch (settings.name) {
@@ -61,7 +63,10 @@ class AppRoutes {
         return MaterialPageRoute(
           builder: (_) => ChatScreen(lectureId: lectureId),
         );
-      
+      case globalChat:
+        return MaterialPageRoute(
+          builder: (_) => const GlobalChatScreen(),
+        );
       default:
         return MaterialPageRoute(
           builder: (_) => const LoginScreen(),

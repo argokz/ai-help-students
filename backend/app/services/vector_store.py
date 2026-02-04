@@ -156,6 +156,49 @@ class VectorStore:
             chunks.sort(key=lambda x: x["score"], reverse=True)
             
             return chunks
+
+    async def search_all_lectures(
+        self,
+        lecture_ids: list[str],
+        query: str,
+        top_k_per_lecture: int = 3,
+        min_score: float = 0.25,
+    ) -> list[dict]:
+        """
+        Поиск по всем указанным лекциям. Возвращает список {lecture_id, chunks}.
+        """
+        if not lecture_ids or not query.strip():
+            return []
+        all_results = []
+        query_embedding = await embedding_service.embed_query(query)
+        async with self._lock:
+            for lecture_id in lecture_ids:
+                collection_name = self._collection_name(lecture_id)
+                try:
+                    collection = self.client.get_collection(name=collection_name)
+                except ValueError:
+                    continue
+                results = collection.query(
+                    query_embeddings=[query_embedding],
+                    n_results=top_k_per_lecture,
+                    include=["documents", "metadatas", "distances"],
+                )
+                chunks = []
+                if results and results["documents"] and results["documents"][0]:
+                    for i, doc in enumerate(results["documents"][0]):
+                        metadata = results["metadatas"][0][i]
+                        distance = results["distances"][0][i]
+                        score = 1 - (distance / 2)
+                        if score >= min_score:
+                            chunks.append({
+                                "text": doc,
+                                "start_time": metadata.get("start_time", 0),
+                                "end_time": metadata.get("end_time", 0),
+                                "score": round(score, 3),
+                            })
+                if chunks:
+                    all_results.append({"lecture_id": lecture_id, "chunks": chunks})
+        return all_results
     
     async def delete_lecture(self, lecture_id: str) -> bool:
         """

@@ -74,3 +74,44 @@ class ChatResponse {
     );
   }
 }
+
+/// Источник в общем чате — лекция.
+class GlobalChatSource {
+  final String lectureId;
+  final String lectureTitle;
+  final String snippet;
+
+  GlobalChatSource({
+    required this.lectureId,
+    required this.lectureTitle,
+    required this.snippet,
+  });
+
+  factory GlobalChatSource.fromJson(Map<String, dynamic> json) {
+    return GlobalChatSource(
+      lectureId: json['lecture_id'] as String,
+      lectureTitle: json['lecture_title'] as String,
+      snippet: json['snippet'] as String,
+    );
+  }
+}
+
+/// Ответ общего чата по всем лекциям.
+class GlobalChatResponse {
+  final String answer;
+  final List<GlobalChatSource> sources;
+
+  GlobalChatResponse({
+    required this.answer,
+    required this.sources,
+  });
+
+  factory GlobalChatResponse.fromJson(Map<String, dynamic> json) {
+    return GlobalChatResponse(
+      answer: json['answer'] as String,
+      sources: (json['sources'] as List)
+          .map((s) => GlobalChatSource.fromJson(s as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+}

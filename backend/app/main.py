@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .database import init_db
-from .routers import auth, chat, lectures, summary
+from .routers import auth, chat, chat_global, lectures, summary
 
 logger = logging.getLogger(__name__)
 
@@ -88,4 +88,9 @@ app.include_router(
     summary.router,
     prefix=f"{settings.api_prefix}/lectures",
     tags=["summary"]
+)
+app.include_router(
+    chat_global.router,
+    prefix=f"{settings.api_prefix}/chat",
+    tags=["chat"],
 )

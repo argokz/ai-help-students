@@ -4,6 +4,8 @@ from .lecture import (
     LectureCreate,
     LectureResponse,
     LectureListResponse,
+    LectureSearchResult,
+    LectureSearchResponse,
     TranscriptSegment,
     TranscriptResponse,
 )
@@ -12,6 +14,9 @@ from .chat import (
     ChatRequest,
     ChatResponse,
     SourceChunk,
+    GlobalChatRequest,
+    GlobalChatResponse,
+    GlobalChatSource,
 )
 from .summary import SummaryResponse
 from .auth import UserRegister, UserLogin, GoogleAuthRequest, TokenResponse, UserResponse
@@ -21,12 +26,17 @@ __all__ = [
     "LectureCreate",
     "LectureResponse",
     "LectureListResponse",
+    "LectureSearchResult",
+    "LectureSearchResponse",
     "TranscriptSegment",
     "TranscriptResponse",
     "ChatMessage",
     "ChatRequest",
     "ChatResponse",
     "SourceChunk",
+    "GlobalChatRequest",
+    "GlobalChatResponse",
+    "GlobalChatSource",
     "SummaryResponse",
     "UserRegister",
     "UserLogin",

@@ -20,6 +20,10 @@ class UploadTask {
   String? lectureId;
   /// Сообщение об ошибке (при status == failed).
   String? errorMessage;
+  /// Когда перешли в статус «обработка» (для показа времени).
+  DateTime? processingStartedAt;
+  /// 0.0–1.0 прогресс обработки от сервера (при status == processing).
+  double? processingProgress;
 
   UploadTask({
     required this.id,
@@ -30,10 +34,15 @@ class UploadTask {
     this.status = UploadTaskStatus.uploading,
     this.lectureId,
     this.errorMessage,
+    this.processingStartedAt,
+    this.processingProgress,
   });
 
   /// Процент загрузки файла (0–100).
   int get uploadPercent => (uploadProgress * 100).round().clamp(0, 100);
+  /// Процент обработки от сервера (0–100), если есть.
+  int? get processingPercent =>
+      processingProgress != null ? (processingProgress! * 100).round().clamp(0, 100) : null;
 
   bool get isUploading => status == UploadTaskStatus.uploading;
   bool get isProcessing => status == UploadTaskStatus.processing;

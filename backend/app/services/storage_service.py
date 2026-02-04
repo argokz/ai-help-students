@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
@@ -42,6 +42,9 @@ class StorageService:
             "has_transcript": lecture.has_transcript,
             "has_summary": lecture.has_summary,
             "error": lecture.error,
+            "processing_progress": lecture.processing_progress,
+            "subject": lecture.subject,
+            "group_name": lecture.group_name,
             "created_at": lecture.created_at.isoformat(),
         }
 
@@ -61,6 +64,8 @@ class StorageService:
             audio_path=data.get("audio_path"),
             language=data.get("language"),
             status=data.get("status", "pending"),
+            subject=data.get("subject"),
+            group_name=data.get("group_name"),
         )
         db.add(lecture)
         await db.commit()
@@ -102,13 +107,94 @@ class StorageService:
     ) -> None:
         await self.update_lecture_metadata(lecture_id, {"status": status}, db)
 
-    async def list_lectures(self, user_id: str, db: AsyncSession) -> list[dict]:
-        """List lectures for user."""
-        result = await db.execute(
-            select(Lecture).where(Lecture.user_id == user_id).order_by(Lecture.created_at.desc())
-        )
+    async def list_lectures(
+        self,
+        user_id: str,
+        db: AsyncSession,
+        subject: Optional[str] = None,
+        group_name: Optional[str] = None,
+    ) -> list[dict]:
+        """List lectures for user, optionally filter by subject and/or group."""
+        q = select(Lecture).where(Lecture.user_id == user_id)
+        if subject is not None and subject != "":
+            q = q.where(Lecture.subject == subject)
+        if group_name is not None and group_name != "":
+            q = q.where(Lecture.group_name == group_name)
+        q = q.order_by(Lecture.created_at.desc())
+        result = await db.execute(q)
         lectures = result.scalars().all()
         return [self._lecture_to_dict(l) for l in lectures]
+
+    async def list_subjects(self, user_id: str, db: AsyncSession) -> list[str]:
+        """Distinct subject values for user's lectures."""
+        result = await db.execute(
+            select(distinct(Lecture.subject))
+            .where(Lecture.user_id == user_id)
+            .where(Lecture.subject.isnot(None))
+            .where(Lecture.subject != "")
+            .order_by(Lecture.subject)
+        )
+        return [r[0] for r in result.all()]
+
+    async def list_groups(self, user_id: str, db: AsyncSession) -> list[str]:
+        """Distinct group_name values for user's lectures."""
+        result = await db.execute(
+            select(distinct(Lecture.group_name))
+            .where(Lecture.user_id == user_id)
+            .where(Lecture.group_name.isnot(None))
+            .where(Lecture.group_name != "")
+            .order_by(Lecture.group_name)
+        )
+        return [r[0] for r in result.all()]
+
+    async def search_lectures(
+        self,
+        user_id: str,
+        query: str,
+        db: AsyncSession,
+        subject: Optional[str] = None,
+        group_name: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        """Умный поиск: по названию и по тексту транскрипта. Возвращает лекции с snippet."""
+        if not query or not query.strip():
+            return []
+        q_lower = query.strip().lower()
+        lectures = await self.list_lectures(user_id, db, subject=subject, group_name=group_name)
+        out = []
+        for l in lectures:
+            if l.get("status") != "completed":
+                if q_lower in (l.get("title") or "").lower():
+                    out.append({
+                        **l,
+                        "snippet": None,
+                        "match_in": "title",
+                    })
+                continue
+            title_match = q_lower in (l.get("title") or "").lower()
+            full_text = ""
+            transcript = await self.get_transcript(l["id"])
+            if transcript and transcript.get("segments"):
+                full_text = " ".join(s.get("text", "") for s in transcript["segments"])
+            text_match = q_lower in full_text.lower() if full_text else False
+            if not title_match and not text_match:
+                continue
+            snippet = None
+            match_in = "title" if title_match else "transcript"
+            if text_match and full_text:
+                pos = full_text.lower().find(q_lower)
+                start = max(0, pos - 80)
+                end = min(len(full_text), pos + len(query) + 120)
+                snippet = (full_text[start:end] + "…") if end < len(full_text) else full_text[start:end]
+                snippet = snippet.strip()
+            out.append({
+                **l,
+                "snippet": snippet,
+                "match_in": match_in,
+            })
+            if len(out) >= limit:
+                break
+        return out
 
     async def save_transcript(
         self,
@@ -143,12 +229,11 @@ class StorageService:
             return json.loads(content)
 
     async def delete_lecture(self, lecture_id: str, db: AsyncSession) -> None:
-        """Delete lecture from DB and remove files."""
+        """Delete lecture from DB and remove files. Commit делает get_db."""
         result = await db.execute(select(Lecture).where(Lecture.id == lecture_id))
         lecture = result.scalar_one_or_none()
         if lecture:
             db.delete(lecture)
-            await db.commit()
         for path in [self._transcript_path(lecture_id), self._summary_path(lecture_id)]:
             if path.exists():
                 os.remove(path)

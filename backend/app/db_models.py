@@ -40,6 +40,9 @@ class Lecture(Base):
     has_transcript: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     has_summary: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    processing_progress: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # 0.0–1.0 при status=processing
+    subject: Mapped[Optional[str]] = mapped_column(String(256), nullable=True, index=True)  # предмет
+    group_name: Mapped[Optional[str]] = mapped_column(String(256), nullable=True, index=True)  # группа
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
     user: Mapped["User"] = relationship("User", back_populates="lectures")

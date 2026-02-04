@@ -2,6 +2,7 @@
 from collections.abc import AsyncGenerator
 
 import asyncpg
+from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
@@ -92,6 +93,17 @@ async def init_db() -> None:
         await _ensure_database_exists()
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+        # Миграции: добавить колонки, если их ещё нет
+        async with engine.begin() as conn:
+            await conn.execute(text(
+                "ALTER TABLE lectures ADD COLUMN IF NOT EXISTS processing_progress REAL"
+            ))
+            await conn.execute(text(
+                "ALTER TABLE lectures ADD COLUMN IF NOT EXISTS subject VARCHAR(256)"
+            ))
+            await conn.execute(text(
+                "ALTER TABLE lectures ADD COLUMN IF NOT EXISTS group_name VARCHAR(256)"
+            ))
         logger.info("Database tables initialized")
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")

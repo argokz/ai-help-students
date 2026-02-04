@@ -5,6 +5,7 @@ import '../models/lecture.dart';
 import '../models/transcript.dart';
 import '../models/summary.dart';
 import '../models/chat_message.dart';
+import '../models/lecture.dart' show Lecture, LectureSearchResult;
 import '../models/auth.dart';
 import 'auth_repository.dart';
 
@@ -72,18 +73,46 @@ class ApiClient {
 
   // Lectures
 
-  Future<List<Lecture>> getLectures() async {
-    final response = await _dio.get('/lectures');
+  /// Список лекций с опциональным фильтром по предмету и группе.
+  /// В ответе также subjects и groups для фильтров в UI.
+  Future<LectureListResult> getLectures({
+    String? subject,
+    String? groupName,
+  }) async {
+    final response = await _dio.get(
+      '/lectures',
+      queryParameters: {
+        if (subject != null && subject.isNotEmpty) 'subject': subject,
+        if (groupName != null && groupName.isNotEmpty) 'group_name': groupName,
+      },
+    );
     final data = response.data as Map<String, dynamic>;
     final lectures = (data['lectures'] as List)
         .map((l) => Lecture.fromJson(l as Map<String, dynamic>))
         .toList();
-    return lectures;
+    final subjects = (data['subjects'] as List?)?.cast<String>() ?? [];
+    final groups = (data['groups'] as List?)?.cast<String>() ?? [];
+    return LectureListResult(
+      lectures: lectures,
+      subjects: subjects,
+      groups: groups,
+    );
   }
 
   Future<Lecture> getLecture(String id) async {
     final response = await _dio.get('/lectures/$id');
     return Lecture.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// URL аудио лекции для воспроизведения (нужен заголовок Authorization).
+  static String lectureAudioUrl(String lectureId) {
+    return '${AppConfig.apiBaseUrl}/lectures/$lectureId/audio';
+  }
+
+  /// Скачать аудио лекции в файл [savePath]. Возвращает путь при успехе.
+  Future<String> downloadLectureAudio(String lectureId, String savePath) async {
+    await _dio.download('/lectures/$lectureId/audio', savePath);
+    return savePath;
   }
 
   /// [onSendProgress] вызывается с (отправлено байт, всего байт).
@@ -116,6 +145,45 @@ class ApiClient {
 
   Future<void> deleteLecture(String id) async {
     await _dio.delete('/lectures/$id');
+  }
+
+  /// Обновить предмет и/или группу лекции.
+  Future<Lecture> updateLecture(
+    String id, {
+    String? subject,
+    String? groupName,
+  }) async {
+    final response = await _dio.patch(
+      '/lectures/$id',
+      data: {
+        if (subject != null) 'subject': subject,
+        if (groupName != null) 'group_name': groupName,
+      },
+    );
+    return Lecture.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// Умный поиск по названию и тексту транскриптов.
+  Future<List<LectureSearchResult>> searchLectures(
+    String q, {
+    String? subject,
+    String? groupName,
+    int limit = 50,
+  }) async {
+    if (q.trim().isEmpty) return [];
+    final response = await _dio.get(
+      '/lectures/search',
+      queryParameters: {
+        'q': q,
+        if (subject != null && subject.isNotEmpty) 'subject': subject,
+        if (groupName != null && groupName.isNotEmpty) 'group_name': groupName,
+        'limit': limit,
+      },
+    );
+    final data = response.data as Map<String, dynamic>;
+    return (data['results'] as List)
+        .map((r) => LectureSearchResult.fromJson(r as Map<String, dynamic>))
+        .toList();
   }
 
   // Transcript
@@ -152,6 +220,34 @@ class ApiClient {
     );
     return ChatResponse.fromJson(response.data as Map<String, dynamic>);
   }
+
+  /// Общий чат по всем лекциям.
+  Future<GlobalChatResponse> sendGlobalMessage({
+    required String question,
+    List<ChatMessage>? history,
+  }) async {
+    final response = await _dio.post(
+      '/chat/global',
+      data: {
+        'question': question,
+        if (history != null)
+          'history': history.map((m) => m.toJson()).toList(),
+      },
+    );
+    return GlobalChatResponse.fromJson(response.data as Map<String, dynamic>);
+  }
+}
+
+/// Результат getLectures с списками для фильтров.
+class LectureListResult {
+  final List<Lecture> lectures;
+  final List<String> subjects;
+  final List<String> groups;
+  LectureListResult({
+    required this.lectures,
+    required this.subjects,
+    required this.groups,
+  });
 }
 
 final apiClient = ApiClient();

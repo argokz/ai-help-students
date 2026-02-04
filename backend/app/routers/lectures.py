@@ -1,11 +1,14 @@
 """Lectures API router."""
+import asyncio
 import uuid
 import aiofiles
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, BackgroundTasks
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, BackgroundTasks, Body
+from fastapi.responses import FileResponse
+from pydantic import BaseModel as PydanticBaseModel
 
 from ..config import settings
 from ..database import AsyncSessionLocal, get_db
@@ -14,6 +17,8 @@ from ..dependencies import get_current_user
 from ..models import (
     LectureListResponse,
     LectureResponse,
+    LectureSearchResponse,
+    LectureSearchResult,
     TranscriptResponse,
     TranscriptSegment,
 )
@@ -24,6 +29,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 router = APIRouter()
 
 
+def _get_audio_duration_sec(audio_path: str) -> Optional[float]:
+    """Длительность аудио в секундах (для расчёта прогресса)."""
+    try:
+        from mutagen import File as MutagenFile
+        audio = MutagenFile(audio_path)
+        if audio is not None and hasattr(audio, "info") and audio.info is not None:
+            return getattr(audio.info, "length", None)
+    except Exception:
+        pass
+    return None
+
+
 @router.post("/upload", response_model=LectureResponse)
 async def upload_lecture(
     background_tasks: BackgroundTasks,
@@ -32,6 +49,8 @@ async def upload_lecture(
     file: UploadFile = File(...),
     title: Optional[str] = Form(None),
     language: Optional[str] = Form(None),
+    subject: Optional[str] = Form(None),
+    group_name: Optional[str] = Form(None),
 ):
     """Upload an audio file for transcription. Requires auth."""
     allowed_extensions = {".mp3", ".wav", ".m4a", ".ogg", ".webm", ".flac"}
@@ -62,6 +81,8 @@ async def upload_lecture(
         "audio_path": str(audio_path),
         "language": language,
         "status": "pending",
+        "subject": subject,
+        "group_name": group_name,
     }
 
     await storage_service.save_lecture_metadata(lecture_id, current_user.id, lecture_data, db)
@@ -83,6 +104,9 @@ async def upload_lecture(
         created_at=datetime.utcnow(),
         has_transcript=False,
         has_summary=False,
+        processing_progress=None,
+        subject=None,
+        group_name=None,
     )
 
 
@@ -91,29 +115,54 @@ async def process_lecture_transcription(
     audio_path: str,
     language: Optional[str],
 ):
-    """Background task: transcribe and index."""
+    """Background task: transcribe and index. Обновляет processing_progress при обработке."""
     from ..database import AsyncSessionLocal
     from ..services.vector_store import vector_store
+
+    total_duration = _get_audio_duration_sec(audio_path)
+    loop = asyncio.get_event_loop()
+
+    async def update_progress(progress: float) -> None:
+        async with AsyncSessionLocal() as db:
+            await storage_service.update_lecture_metadata(
+                lecture_id, {"processing_progress": round(progress, 3)}, db
+            )
+
+    def on_progress(p: float) -> None:
+        asyncio.run_coroutine_threadsafe(update_progress(p), loop)
 
     async with AsyncSessionLocal() as db:
         try:
             await storage_service.update_lecture_status(lecture_id, "processing", db)
-            result = await asr_service.transcribe(audio_path, language)
-            await storage_service.save_transcript(lecture_id, result, db)
-            await storage_service.update_lecture_metadata(
-                lecture_id,
-                {
-                    "status": "completed",
-                    "language": result.get("language"),
-                    "duration": result.get("duration"),
-                },
-                db,
-            )
-            await vector_store.index_lecture(lecture_id, result["segments"])
-        except Exception as e:
+        finally:
+            pass
+
+    try:
+        result = await asr_service.transcribe(
+            audio_path,
+            language,
+            total_duration=total_duration,
+            progress_callback=on_progress if total_duration else None,
+        )
+    except Exception as e:
+        async with AsyncSessionLocal() as db:
             await storage_service.update_lecture_status(lecture_id, "failed", db)
             await storage_service.update_lecture_metadata(lecture_id, {"error": str(e)}, db)
-            raise
+        raise
+
+    async with AsyncSessionLocal() as db:
+        await storage_service.save_transcript(lecture_id, result, db)
+        await storage_service.update_lecture_metadata(
+            lecture_id,
+            {
+                "status": "completed",
+                "language": result.get("language"),
+                "duration": result.get("duration"),
+                "processing_progress": None,
+            },
+            db,
+        )
+    await vector_store.index_lecture(lecture_id, result["segments"])
 
 
 def _check_lecture_owner(lecture: dict, user_id: str) -> None:
@@ -121,29 +170,70 @@ def _check_lecture_owner(lecture: dict, user_id: str) -> None:
         raise HTTPException(status_code=403, detail="Доступ запрещён")
 
 
+def _lecture_to_response(l: dict) -> LectureResponse:
+    return LectureResponse(
+        id=l["id"],
+        title=l["title"],
+        filename=l["filename"],
+        duration=l.get("duration"),
+        language=l.get("language"),
+        status=l["status"],
+        created_at=datetime.fromisoformat(l["created_at"]),
+        has_transcript=l.get("has_transcript", False),
+        has_summary=l.get("has_summary", False),
+        processing_progress=l.get("processing_progress"),
+        subject=l.get("subject"),
+        group_name=l.get("group_name"),
+    )
+
+
 @router.get("", response_model=LectureListResponse)
 async def list_lectures(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    subject: Optional[str] = None,
+    group_name: Optional[str] = None,
 ):
-    """List current user's lectures."""
-    lectures = await storage_service.list_lectures(current_user.id, db)
+    """List current user's lectures. Фильтр по предмету и/или группе."""
+    lectures = await storage_service.list_lectures(
+        current_user.id, db, subject=subject, group_name=group_name
+    )
+    subjects = await storage_service.list_subjects(current_user.id, db)
+    groups = await storage_service.list_groups(current_user.id, db)
     return LectureListResponse(
-        lectures=[
-            LectureResponse(
-                id=l["id"],
-                title=l["title"],
-                filename=l["filename"],
-                duration=l.get("duration"),
-                language=l.get("language"),
-                status=l["status"],
-                created_at=datetime.fromisoformat(l["created_at"]),
-                has_transcript=l.get("has_transcript", False),
-                has_summary=l.get("has_summary", False),
-            )
-            for l in lectures
-        ],
+        lectures=[_lecture_to_response(l) for l in lectures],
         total=len(lectures),
+        subjects=subjects,
+        groups=groups,
+    )
+
+
+@router.get("/search", response_model=LectureSearchResponse)
+async def search_lectures(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    q: str = "",
+    subject: Optional[str] = None,
+    group_name: Optional[str] = None,
+    limit: int = 50,
+):
+    """Умный поиск по названию и тексту транскриптов."""
+    results = await storage_service.search_lectures(
+        current_user.id, q, db, subject=subject, group_name=group_name, limit=limit
+    )
+    return LectureSearchResponse(
+        results=[
+            LectureSearchResult(
+                id=r["id"],
+                title=r["title"],
+                subject=r.get("subject"),
+                group_name=r.get("group_name"),
+                snippet=r.get("snippet"),
+                match_in=r.get("match_in"),
+            )
+            for r in results
+        ],
+        total=len(results),
     )
 
 
@@ -158,17 +248,37 @@ async def get_lecture(
     if not lecture:
         raise HTTPException(status_code=404, detail="Lecture not found")
     _check_lecture_owner(lecture, current_user.id)
-    return LectureResponse(
-        id=lecture["id"],
-        title=lecture["title"],
-        filename=lecture["filename"],
-        duration=lecture.get("duration"),
-        language=lecture.get("language"),
-        status=lecture["status"],
-        created_at=datetime.fromisoformat(lecture["created_at"]),
-        has_transcript=lecture.get("has_transcript", False),
-        has_summary=lecture.get("has_summary", False),
-    )
+    return _lecture_to_response(lecture)
+
+
+class _LectureUpdateBody(PydanticBaseModel):
+    subject: Optional[str] = None
+    group_name: Optional[str] = None
+
+
+@router.patch("/{lecture_id}", response_model=LectureResponse)
+async def update_lecture(
+    lecture_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    body: Optional[_LectureUpdateBody] = Body(None),
+):
+    """Обновить предмет и/или группу лекции."""
+    if body is None:
+        body = _LectureUpdateBody()
+    lecture = await storage_service.get_lecture_metadata(lecture_id, db)
+    if not lecture:
+        raise HTTPException(status_code=404, detail="Lecture not found")
+    _check_lecture_owner(lecture, current_user.id)
+    updates = {}
+    if body.subject is not None:
+        updates["subject"] = body.subject if body.subject != "" else None
+    if body.group_name is not None:
+        updates["group_name"] = body.group_name if body.group_name != "" else None
+    if updates:
+        await storage_service.update_lecture_metadata(lecture_id, updates, db)
+        lecture = await storage_service.get_lecture_metadata(lecture_id, db)
+    return _lecture_to_response(lecture)
 
 
 @router.get("/{lecture_id}/transcript", response_model=TranscriptResponse)
@@ -199,6 +309,49 @@ async def get_transcript(
         segments=segments,
         full_text=full_text,
         language=transcript.get("language"),
+    )
+
+
+@router.get("/{lecture_id}/audio")
+async def get_lecture_audio(
+    lecture_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Скачать / прослушать аудио лекции. Только владелец."""
+    lecture = await storage_service.get_lecture_metadata(lecture_id, db)
+    if not lecture:
+        raise HTTPException(status_code=404, detail="Lecture not found")
+    _check_lecture_owner(lecture, current_user.id)
+
+    audio_path = lecture.get("audio_path")
+    path_obj = None
+    if audio_path:
+        path_obj = Path(audio_path)
+        if not path_obj.exists():
+            path_obj = None
+    if path_obj is None:
+        for ext in [".mp3", ".wav", ".m4a", ".ogg", ".webm", ".flac"]:
+            candidate = settings.audio_dir / f"{lecture_id}{ext}"
+            if candidate.exists():
+                path_obj = candidate
+                break
+    if path_obj is None or not path_obj.exists():
+        raise HTTPException(status_code=404, detail="Audio file not found")
+
+    media_types = {
+        ".mp3": "audio/mpeg",
+        ".m4a": "audio/mp4",
+        ".wav": "audio/wav",
+        ".ogg": "audio/ogg",
+        ".webm": "audio/webm",
+        ".flac": "audio/flac",
+    }
+    media_type = media_types.get(path_obj.suffix.lower(), "application/octet-stream")
+    return FileResponse(
+        str(path_obj),
+        media_type=media_type,
+        filename=lecture.get("filename") or path_obj.name,
     )
 
 

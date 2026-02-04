@@ -1,6 +1,6 @@
 """ASR service using faster-whisper for speech-to-text."""
 import asyncio
-from typing import Optional
+from typing import Callable, Optional
 from ..config import settings
 
 
@@ -33,6 +33,8 @@ class ASRService:
         self,
         audio_path: str,
         language: Optional[str] = None,
+        total_duration: Optional[float] = None,
+        progress_callback: Optional[object] = None,  # Callable[[float], None]
     ) -> dict:
         """
         Transcribe audio file to text with timestamps.
@@ -40,21 +42,21 @@ class ASRService:
         Args:
             audio_path: Path to the audio file
             language: Optional language code (ru, kz, en) or None for auto-detect
+            total_duration: Total audio duration in seconds (for progress, from mutagen)
+            progress_callback: Optional callable(progress 0.0–1.0), called from sync code
             
         Returns:
-            dict with:
-                - segments: list of {start, end, text}
-                - language: detected language
-                - duration: total audio duration
+            dict with segments, language, duration
         """
         async with self._model_lock:
-            # Run in thread pool since faster-whisper is synchronous
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(
                 None,
                 self._transcribe_sync,
                 audio_path,
-                language
+                language,
+                total_duration,
+                progress_callback,
             )
             return result
     
@@ -62,17 +64,16 @@ class ASRService:
         self,
         audio_path: str,
         language: Optional[str] = None,
+        total_duration: Optional[float] = None,
+        progress_callback: Optional[Callable[[float], None]] = None,
     ) -> dict:
         """Synchronous transcription (runs in thread pool)."""
-        # Map language codes
         lang_map = {
-            "kz": "kk",  # Kazakh uses 'kk' in Whisper
+            "kz": "kk",
             "kazakh": "kk",
         }
-        
         whisper_lang = lang_map.get(language, language) if language else None
-        
-        # Transcribe (параметры ускорения: beam_size=1, condition_on_previous_text=False)
+
         segments_generator, info = self.model.transcribe(
             audio_path,
             language=whisper_lang,
@@ -80,13 +81,10 @@ class ASRService:
             beam_size=settings.whisper_beam_size,
             condition_on_previous_text=settings.whisper_condition_on_previous_text,
             vad_filter=True,
-            vad_parameters=dict(
-                min_silence_duration_ms=500,
-            ),
+            vad_parameters=dict(min_silence_duration_ms=500),
             word_timestamps=False,
         )
-        
-        # Collect segments
+
         segments = []
         for segment in segments_generator:
             segments.append({
@@ -94,10 +92,14 @@ class ASRService:
                 "end": round(segment.end, 2),
                 "text": segment.text.strip(),
             })
-        
-        # Calculate duration from last segment or info
+            if progress_callback and total_duration and total_duration > 0:
+                progress = min(1.0, segment.end / total_duration)
+                try:
+                    progress_callback(progress)
+                except Exception:
+                    pass
+
         duration = segments[-1]["end"] if segments else 0
-        
         return {
             "segments": segments,
             "language": info.language,

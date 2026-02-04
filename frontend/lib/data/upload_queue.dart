@@ -11,6 +11,8 @@ class UploadQueueNotifier extends ChangeNotifier {
   final ApiClient _api = apiClient;
   static const _pollInterval = Duration(seconds: 5);
   final Map<String, Timer> _pollTimers = {};
+  /// Вызывается, когда лекция перешла в completed — можно обновить список.
+  void Function()? onLectureCompleted;
 
   List<UploadTask> get tasks => List.unmodifiable(_tasks);
 
@@ -57,6 +59,7 @@ class UploadQueueNotifier extends ChangeNotifier {
       task.uploadProgress = 1.0;
       task.lectureId = lecture.id;
       task.status = UploadTaskStatus.processing;
+      task.processingStartedAt = DateTime.now();
       task.errorMessage = null;
       notifyListeners();
 
@@ -81,6 +84,7 @@ class UploadQueueNotifier extends ChangeNotifier {
           _pollTimers.remove(task.id);
           task.status = UploadTaskStatus.completed;
           notifyListeners();
+          onLectureCompleted?.call();
           _removeTaskLater(task);
           return;
         }
@@ -92,6 +96,10 @@ class UploadQueueNotifier extends ChangeNotifier {
           notifyListeners();
           return;
         }
+        if (lecture.status == 'processing') {
+          task.processingProgress = lecture.processingProgress;
+          notifyListeners();
+        }
       } catch (_) {}
     }
 
@@ -101,7 +109,7 @@ class UploadQueueNotifier extends ChangeNotifier {
   }
 
   void _removeTaskLater(UploadTask task) {
-    Future.delayed(const Duration(milliseconds: 500), () {
+    Future.delayed(const Duration(milliseconds: 800), () {
       _tasks.remove(task);
       notifyListeners();
     });
