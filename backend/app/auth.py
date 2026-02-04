@@ -1,4 +1,5 @@
 """Auth: JWT, password hashing, Google ID token verification."""
+import asyncio
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -34,21 +35,37 @@ def decode_access_token(token: str) -> Optional[str]:
         return None
 
 
-def verify_google_id_token(id_token_str: str) -> Optional[dict]:
+def _verify_google_id_token_sync(id_token_str: str) -> Optional[dict]:
+    """Synchronous Google token verification (run in thread)."""
+    if not settings.google_client_id:
+        return None
+    audiences = [settings.google_client_id]
+    if settings.google_android_client_id:
+        audiences.append(settings.google_android_client_id)
+    idinfo = id_token.verify_oauth2_token(
+        id_token_str,
+        google_requests.Request(),
+        audiences[0] if len(audiences) == 1 else audiences,
+    )
+    if idinfo.get("iss") not in ("accounts.google.com", "https://accounts.google.com"):
+        return None
+    return idinfo
+
+
+async def verify_google_id_token(id_token_str: str) -> Optional[dict]:
     """
     Verify Google ID token and return payload (email, sub, etc.) or None.
-    Requires GOOGLE_CLIENT_ID to be set (Web client ID from Google Cloud Console).
+    Runs sync verification in thread pool to avoid blocking.
     """
     if not settings.google_client_id:
         return None
     try:
-        idinfo = id_token.verify_oauth2_token(
+        loop = asyncio.get_event_loop()
+        idinfo = await loop.run_in_executor(
+            None,
+            _verify_google_id_token_sync,
             id_token_str,
-            google_requests.Request(),
-            settings.google_client_id,
         )
-        if idinfo.get("iss") not in ("accounts.google.com", "https://accounts.google.com"):
-            return None
         return idinfo
-    except (ValueError, Exception):
+    except Exception:
         return None

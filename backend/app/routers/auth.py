@@ -81,40 +81,47 @@ async def google_auth(
     db: AsyncSession = Depends(get_db),
 ):
     """Вход через Google: передайте id_token из Google Sign-In."""
-    if not settings.google_client_id:
+    try:
+        if not settings.google_client_id:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Google Sign-In не настроен на сервере",
+            )
+        idinfo = await verify_google_id_token(data.id_token)
+        if not idinfo:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Неверный или истёкший Google токен. Убедитесь, что в приложении указан Web Client ID как serverClientId.",
+            )
+        email = idinfo.get("email")
+        if not email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email не получен от Google",
+            )
+        result = await db.execute(select(User).where(User.email == email))
+        user = result.scalar_one_or_none()
+        if not user:
+            user = User(
+                email=email,
+                hashed_password=hash_password(secrets.token_urlsafe(32)),
+            )
+            db.add(user)
+            await db.flush()
+        token = create_access_token(subject=user.id)
+        return TokenResponse(
+            access_token=token,
+            token_type="bearer",
+            user_id=user.id,
+            email=user.email,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Google Sign-In не настроен на сервере",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка при входе через Google: {str(e)}" if settings.app_debug else "Ошибка при входе через Google",
         )
-    idinfo = verify_google_id_token(data.id_token)
-    if not idinfo:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Неверный или истёкший Google токен",
-        )
-    email = idinfo.get("email")
-    if not email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email не получен от Google",
-        )
-    result = await db.execute(select(User).where(User.email == email))
-    user = result.scalar_one_or_none()
-    if not user:
-        user = User(
-            email=email,
-            hashed_password=hash_password(secrets.token_urlsafe(32)),
-        )
-        db.add(user)
-        await db.commit()
-        await db.refresh(user)
-    token = create_access_token(subject=user.id)
-    return TokenResponse(
-        access_token=token,
-        token_type="bearer",
-        user_id=user.id,
-        email=user.email,
-    )
 
 
 @router.get("/me", response_model=UserResponse)
