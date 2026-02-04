@@ -20,7 +20,7 @@ dependencies:
   equatable: ^2.0.5
   
   # Audio recording
-  record: ^5.1.0
+  record: ^6.0.0
   
   # Audio playback
   just_audio: ^0.9.36
@@ -38,6 +38,9 @@ dependencies:
   
   # Local storage
   shared_preferences: ^2.2.2
+
+  # Google Sign-In
+  google_sign_in: ^6.2.1
 
 dev_dependencies:
   flutter_test:

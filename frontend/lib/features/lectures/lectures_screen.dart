@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../models/lecture.dart';
 import '../../data/api_client.dart';
+import '../../data/auth_repository.dart';
 import '../../app/routes.dart';
 
 class LecturesScreen extends StatefulWidget {
@@ -50,6 +51,15 @@ class _LecturesScreenState extends State<LecturesScreen> {
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _loadLectures,
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: 'Выйти',
+            onPressed: () async {
+              await authRepository.logout();
+              if (!context.mounted) return;
+              Navigator.pushReplacementNamed(context, AppRoutes.login);
+            },
           ),
         ],
       ),

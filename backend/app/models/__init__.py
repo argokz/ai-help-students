@@ -14,10 +14,11 @@ from .chat import (
     SourceChunk,
 )
 from .summary import SummaryResponse
+from .auth import UserRegister, UserLogin, GoogleAuthRequest, TokenResponse, UserResponse
 
 __all__ = [
     "Lecture",
-    "LectureCreate", 
+    "LectureCreate",
     "LectureResponse",
     "LectureListResponse",
     "TranscriptSegment",
@@ -27,4 +28,9 @@ __all__ = [
     "ChatResponse",
     "SourceChunk",
     "SummaryResponse",
+    "UserRegister",
+    "UserLogin",
+    "GoogleAuthRequest",
+    "TokenResponse",
+    "UserResponse",
 ]

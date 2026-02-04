@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../features/auth/login_screen.dart';
+import '../features/auth/register_screen.dart';
 import '../features/lectures/lectures_screen.dart';
 import '../features/lectures/lecture_detail_screen.dart';
 import '../features/recording/recording_screen.dart';
@@ -7,7 +9,9 @@ import '../features/summary/summary_screen.dart';
 import '../features/chat/chat_screen.dart';
 
 class AppRoutes {
-  static const String lectures = '/';
+  static const String login = '/';
+  static const String register = '/register';
+  static const String lectures = '/lectures';
   static const String lectureDetail = '/lecture';
   static const String recording = '/recording';
   static const String transcript = '/transcript';
@@ -16,6 +20,14 @@ class AppRoutes {
 
   static Route<dynamic> generateRoute(RouteSettings settings) {
     switch (settings.name) {
+      case login:
+        return MaterialPageRoute(
+          builder: (_) => const LoginScreen(),
+        );
+      case register:
+        return MaterialPageRoute(
+          builder: (_) => const RegisterScreen(),
+        );
       case lectures:
         return MaterialPageRoute(
           builder: (_) => const LecturesScreen(),
@@ -52,7 +64,7 @@ class AppRoutes {
       
       default:
         return MaterialPageRoute(
-          builder: (_) => const LecturesScreen(),
+          builder: (_) => const LoginScreen(),
         );
     }
   }

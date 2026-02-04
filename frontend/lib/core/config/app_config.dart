@@ -25,6 +25,14 @@ class AppConfig {
   static const int receiveTimeout = 120;
   
   // ===========================================
+  // Google Sign-In
+  // ===========================================
+  
+  /// Web Client ID from Google Cloud Console (for backend verification).
+  /// Web Client ID (тот же, что GOOGLE_CLIENT_ID на бэкенде). Android client задаётся в Google Cloud по package name + SHA-1.
+  static const String googleClientId = '685511640887-n0uhb49sok2eej9lulbb40apudjik0sb.apps.googleusercontent.com';
+
+  // ===========================================
   // App Info
   // ===========================================
   

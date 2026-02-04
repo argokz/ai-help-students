@@ -44,6 +44,17 @@ class Settings(BaseSettings):
     # Redis settings (for Celery)
     redis_url: str = "redis://localhost:6379/0"
     
+    # Database
+    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/lecture_assistant"
+    
+    # JWT
+    jwt_secret: str = "change-me-in-production-use-env"
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 60 * 24 * 7  # 7 days
+    
+    # Google OAuth (Web Client ID for backend verification)
+    google_client_id: str = ""
+    
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

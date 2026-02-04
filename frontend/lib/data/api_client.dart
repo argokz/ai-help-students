@@ -5,9 +5,12 @@ import '../models/lecture.dart';
 import '../models/transcript.dart';
 import '../models/summary.dart';
 import '../models/chat_message.dart';
+import '../models/auth.dart';
+import 'auth_repository.dart';
 
 class ApiClient {
   final Dio _dio;
+  final AuthRepository _auth = authRepository;
 
   ApiClient() : _dio = Dio(BaseOptions(
     baseUrl: AppConfig.apiBaseUrl,
@@ -16,10 +19,59 @@ class ApiClient {
     headers: {
       'Content-Type': 'application/json',
     },
-  ));
+  )) {
+    _dio.interceptors.add(InterceptorsWrapper(
+      onRequest: (options, handler) async {
+        final token = await _auth.getToken();
+        if (token != null && token.isNotEmpty) {
+          options.headers['Authorization'] = 'Bearer $token';
+        }
+        handler.next(options);
+      },
+      onError: (err, handler) async {
+        if (err.response?.statusCode == 401) {
+          await _auth.logout();
+          // Caller can redirect to login if needed
+        }
+        handler.next(err);
+      },
+    ));
+  }
+
+  // Auth
+
+  Future<TokenResponse> register({required String email, required String password}) async {
+    final response = await _dio.post(
+      '/auth/register',
+      data: {'email': email, 'password': password},
+    );
+    return TokenResponse.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  Future<TokenResponse> login({required String email, required String password}) async {
+    final response = await _dio.post(
+      '/auth/login',
+      data: {'email': email, 'password': password},
+    );
+    return TokenResponse.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  Future<UserInfo> getMe() async {
+    final response = await _dio.get('/auth/me');
+    return UserInfo.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// Вход через Google. Передайте id_token из Google Sign-In.
+  Future<TokenResponse> loginWithGoogle(String idToken) async {
+    final response = await _dio.post(
+      '/auth/google',
+      data: {'id_token': idToken},
+    );
+    return TokenResponse.fromJson(response.data as Map<String, dynamic>);
+  }
 
   // Lectures
-  
+
   Future<List<Lecture>> getLectures() async {
     final response = await _dio.get('/lectures');
     final data = response.data as Map<String, dynamic>;
@@ -99,5 +151,4 @@ class ApiClient {
   }
 }
 
-// Global instance
 final apiClient = ApiClient();
