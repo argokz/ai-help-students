@@ -101,6 +101,8 @@ class _LoginScreenState extends State<LoginScreen> {
         token: res.accessToken,
         userId: res.userId,
         email: res.email,
+        displayName: account.displayName,
+        photoUrl: account.photoUrl,
       );
       if (!mounted) return;
       Navigator.pushReplacementNamed(context, AppRoutes.lectures);

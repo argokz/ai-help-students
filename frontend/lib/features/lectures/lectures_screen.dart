@@ -7,6 +7,7 @@ import '../../data/api_client.dart';
 import '../../data/auth_repository.dart';
 import '../../data/upload_queue.dart';
 import '../../app/routes.dart';
+import '../../core/layout/responsive.dart';
 
 class LecturesScreen extends StatefulWidget {
   const LecturesScreen({super.key});
@@ -28,13 +29,30 @@ class _LecturesScreenState extends State<LecturesScreen> {
   String? _error;
   Timer? _processingTicker;
   final TextEditingController _searchController = TextEditingController();
+  String? _profileName;
+  String? _profileEmail;
+  String? _profilePhotoUrl;
 
   @override
   void initState() {
     super.initState();
     _loadLectures();
+    _loadProfile();
     uploadQueue.onLectureCompleted = _onLectureCompleted;
     _startProcessingTicker();
+  }
+
+  Future<void> _loadProfile() async {
+    final email = await authRepository.getEmail();
+    final name = await authRepository.getDisplayName();
+    final photo = await authRepository.getPhotoUrl();
+    if (mounted) {
+      setState(() {
+        _profileEmail = email;
+        _profileName = name;
+        _profilePhotoUrl = photo;
+      });
+    }
   }
 
   void _startProcessingTicker() {
@@ -222,17 +240,9 @@ class _LecturesScreenState extends State<LecturesScreen> {
             icon: const Icon(Icons.refresh),
             onPressed: _loadLectures,
           ),
-          IconButton(
-            icon: const Icon(Icons.logout),
-            tooltip: 'Выйти',
-            onPressed: () async {
-              await authRepository.logout();
-              if (!context.mounted) return;
-              Navigator.pushReplacementNamed(context, AppRoutes.login);
-            },
-          ),
         ],
       ),
+      drawer: _buildDrawer(context),
       body: ListenableBuilder(
         listenable: uploadQueue,
         builder: (context, _) {
@@ -256,6 +266,97 @@ class _LecturesScreenState extends State<LecturesScreen> {
         },
         icon: const Icon(Icons.mic),
         label: const Text('Записать'),
+      ),
+    );
+  }
+
+  Widget _buildDrawer(BuildContext context) {
+    final theme = Theme.of(context);
+    return Drawer(
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            InkWell(
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.pushNamed(context, AppRoutes.profile);
+              },
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
+                child: Row(
+                  children: [
+                    _DrawerAvatar(photoUrl: _profilePhotoUrl),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _profileName?.isNotEmpty == true
+                                ? _profileName!
+                                : (_profileEmail ?? 'Пользователь'),
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          if (_profileEmail != null) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              _profileEmail!,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.person_outline),
+              title: const Text('Профиль'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.pushNamed(context, AppRoutes.profile);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.school_outlined),
+              title: const Text('Мои лекции'),
+              onTap: () => Navigator.pop(context),
+            ),
+            ListTile(
+              leading: const Icon(Icons.chat_bubble_outline),
+              title: const Text('Общий чат'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.pushNamed(context, AppRoutes.globalChat);
+              },
+            ),
+            const Spacer(),
+            const Divider(height: 1),
+            ListTile(
+              leading: Icon(Icons.logout, color: theme.colorScheme.error),
+              title: Text('Выйти', style: TextStyle(color: theme.colorScheme.error)),
+              onTap: () async {
+                Navigator.pop(context);
+                await authRepository.logout();
+                if (!context.mounted) return;
+                Navigator.pushReplacementNamed(context, AppRoutes.login);
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
       ),
     );
   }
@@ -314,170 +415,248 @@ class _LecturesScreenState extends State<LecturesScreen> {
       );
     }
 
+    final padding = Responsive.contentPadding(context);
+    final crossAxisCount = Responsive.gridCrossAxisCount(context);
+
     return RefreshIndicator(
       onRefresh: _loadLectures,
-      child: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          // Поиск
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _searchController,
-                  decoration: const InputDecoration(
-                    hintText: 'Поиск по названию и тексту...',
-                    prefixIcon: Icon(Icons.search),
-                    border: OutlineInputBorder(),
-                    isDense: true,
+      child: CustomScrollView(
+        slivers: [
+          SliverPadding(
+            padding: EdgeInsets.fromLTRB(padding, padding, padding, 0),
+            sliver: SliverToBoxAdapter(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _searchController,
+                          decoration: const InputDecoration(
+                            hintText: 'Поиск по названию и тексту...',
+                            prefixIcon: Icon(Icons.search),
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                          onSubmitted: (_) => _runSearch(),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton.filled(
+                        onPressed: _isSearching ? null : _runSearch,
+                        icon: _isSearching
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.search),
+                      ),
+                    ],
                   ),
-                  onSubmitted: (_) => _runSearch(),
-                ),
+                  if (_searchResults != null && _searchQuery.isNotEmpty) ...[
+                    TextButton(
+                      onPressed: () {
+                        _searchController.clear();
+                        setState(() {
+                          _searchResults = null;
+                          _searchQuery = '';
+                        });
+                      },
+                      child: const Text('Очистить поиск'),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    height: 44,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: FilterChip(
+                            label: const Text('Все'),
+                            selected: _selectedSubject == null && _selectedGroup == null,
+                            onSelected: (_) async {
+                              setState(() {
+                                _selectedSubject = null;
+                                _selectedGroup = null;
+                              });
+                              await _loadLectures();
+                            },
+                          ),
+                        ),
+                        ..._subjects.map((s) => Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: FilterChip(
+                                label: Text(s, overflow: TextOverflow.ellipsis),
+                                selected: _selectedSubject == s,
+                                onSelected: (_) async {
+                                  setState(() {
+                                    _selectedSubject = _selectedSubject == s ? null : s;
+                                    _selectedGroup = null;
+                                  });
+                                  await _loadLectures();
+                                },
+                              ),
+                            )),
+                        ..._groups.map((g) => Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: FilterChip(
+                                label: Text(g, overflow: TextOverflow.ellipsis),
+                                selected: _selectedGroup == g,
+                                onSelected: (_) async {
+                                  setState(() {
+                                    _selectedGroup = _selectedGroup == g ? null : g;
+                                    _selectedSubject = null;
+                                  });
+                                  await _loadLectures();
+                                },
+                              ),
+                            )),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
               ),
-              const SizedBox(width: 8),
-              IconButton.filled(
-                onPressed: _isSearching ? null : _runSearch,
-                icon: _isSearching
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.search),
-              ),
-            ],
-          ),
-          if (_searchResults != null && _searchQuery.isNotEmpty) ...[
-            TextButton(
-              onPressed: () {
-                _searchController.clear();
-                setState(() {
-                  _searchResults = null;
-                  _searchQuery = '';
-                });
-              },
-              child: const Text('Очистить поиск'),
             ),
-          ],
-          const SizedBox(height: 12),
-          // Фильтры: предмет и группа
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              FilterChip(
-                label: const Text('Все'),
-                selected: _selectedSubject == null && _selectedGroup == null,
-                onSelected: (_) async {
-                  setState(() {
-                    _selectedSubject = null;
-                    _selectedGroup = null;
-                  });
-                  await _loadLectures();
-                },
-              ),
-              ..._subjects.map((s) => FilterChip(
-                    label: Text(s),
-                    selected: _selectedSubject == s,
-                    onSelected: (_) async {
-                      setState(() {
-                        _selectedSubject = _selectedSubject == s ? null : s;
-                        _selectedGroup = null;
-                      });
-                      await _loadLectures();
-                    },
-                  )),
-              ..._groups.map((g) => FilterChip(
-                    label: Text(g),
-                    selected: _selectedGroup == g,
-                    onSelected: (_) async {
-                      setState(() {
-                        _selectedGroup = _selectedGroup == g ? null : g;
-                        _selectedSubject = null;
-                      });
-                      await _loadLectures();
-                    },
-                  )),
-            ],
           ),
-          const SizedBox(height: 16),
           if (showSearchResults) ...[
             if (searchEmpty)
-              const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Text('Ничего не найдено'),
+              const SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Text('Ничего не найдено'),
+                  ),
                 ),
               )
             else
-              ..._searchResults!.map((r) => _SearchResultCard(
-                    result: r,
-                    onTap: () => Navigator.pushNamed(
-                      context,
-                      AppRoutes.lectureDetail,
-                      arguments: r.id,
-                    ),
-                  )),
+              SliverPadding(
+                padding: EdgeInsets.symmetric(horizontal: padding),
+                sliver: SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) {
+                      final r = _searchResults![index];
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: _SearchResultCard(
+                          result: r,
+                          onTap: () => Navigator.pushNamed(
+                            context,
+                            AppRoutes.lectureDetail,
+                            arguments: r.id,
+                          ),
+                        ),
+                      );
+                    },
+                    childCount: _searchResults!.length,
+                  ),
+                ),
+              ),
           ] else
-            ..._lectures!.map((lecture) => _LectureCard(
-                  lecture: lecture,
-                  onTap: () {
-                    Navigator.pushNamed(
-                      context,
-                      AppRoutes.lectureDetail,
-                      arguments: lecture.id,
-                    );
-                  },
-                  onDelete: () async {
-                    final confirm = await showDialog<bool>(
-                      context: context,
-                      builder: (context) => AlertDialog(
-                        title: const Text('Удалить лекцию?'),
-                        content: Text('Лекция "${lecture.title}" будет удалена.'),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(context, false),
-                            child: const Text('Отмена'),
-                          ),
-                          FilledButton(
-                            onPressed: () => Navigator.pop(context, true),
-                            child: const Text('Удалить'),
-                          ),
-                        ],
+            SliverPadding(
+              padding: EdgeInsets.symmetric(horizontal: padding),
+              sliver: crossAxisCount > 1
+                  ? SliverGrid(
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: crossAxisCount,
+                        mainAxisSpacing: 12,
+                        crossAxisSpacing: 12,
+                        childAspectRatio: 1.05,
                       ),
-                    );
-                    if (confirm == true) {
-                      final deletedId = lecture.id;
-                      setState(() {
-                        _lectures = _lectures
-                            ?.where((l) => l.id != deletedId)
-                            .toList() ?? [];
-                        _searchResults = null;
-                        _searchQuery = '';
-                        _searchController.clear();
-                      });
-                      try {
-                        await apiClient.deleteLecture(deletedId);
-                        if (!mounted) return;
-                        await _loadLectures();
-                        if (!mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Лекция удалена')),
-                        );
-                      } catch (e) {
-                        if (mounted) {
-                          await _loadLectures();
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Ошибка удаления: $e')),
+                      delegate: SliverChildBuilderDelegate(
+                        (context, index) {
+                          final lecture = _lectures![index];
+                          return _LectureCard(
+                            lecture: lecture,
+                            onTap: () {
+                              Navigator.pushNamed(
+                                context,
+                                AppRoutes.lectureDetail,
+                                arguments: lecture.id,
+                              );
+                            },
+                            onDelete: () => _onDeleteLecture(context, lecture),
                           );
-                        }
-                      }
-                    }
-                  },
-                )),
+                        },
+                        childCount: _lectures!.length,
+                      ),
+                    )
+                  : SliverList(
+                      delegate: SliverChildBuilderDelegate(
+                        (context, index) {
+                          final lecture = _lectures![index];
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: _LectureCard(
+                              lecture: lecture,
+                              onTap: () {
+                                Navigator.pushNamed(
+                                  context,
+                                  AppRoutes.lectureDetail,
+                                  arguments: lecture.id,
+                                );
+                              },
+                              onDelete: () => _onDeleteLecture(context, lecture),
+                            ),
+                          );
+                        },
+                        childCount: _lectures!.length,
+                      ),
+                    ),
+            ),
+          SliverPadding(padding: EdgeInsets.only(bottom: padding + 80)),
         ],
       ),
     );
+  }
+
+  Future<void> _onDeleteLecture(BuildContext context, Lecture lecture) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Удалить лекцию?'),
+        content: Text('Лекция "${lecture.title}" будет удалена.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    final deletedId = lecture.id;
+    setState(() {
+      _lectures = _lectures?.where((l) => l.id != deletedId).toList() ?? [];
+      _searchResults = null;
+      _searchQuery = '';
+      _searchController.clear();
+    });
+    try {
+      await apiClient.deleteLecture(deletedId);
+      if (!mounted) return;
+      await _loadLectures();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Лекция удалена')),
+      );
+    } catch (e) {
+      if (mounted) {
+        await _loadLectures();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Ошибка удаления: $e')),
+        );
+      }
+    }
   }
 }
 
@@ -787,6 +966,31 @@ class _SearchResultCard extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _DrawerAvatar extends StatelessWidget {
+  final String? photoUrl;
+
+  const _DrawerAvatar({this.photoUrl});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return CircleAvatar(
+      radius: 28,
+      backgroundColor: theme.colorScheme.primaryContainer,
+      backgroundImage: photoUrl != null && photoUrl!.isNotEmpty
+          ? NetworkImage(photoUrl!)
+          : null,
+      child: photoUrl == null || photoUrl!.isEmpty
+          ? Icon(
+              Icons.person,
+              size: 32,
+              color: theme.colorScheme.onPrimaryContainer,
+            )
+          : null,
     );
   }
 }

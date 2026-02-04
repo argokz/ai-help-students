@@ -6,6 +6,7 @@ import '../../models/lecture.dart';
 import '../../data/api_client.dart';
 import '../../data/auth_repository.dart';
 import '../../app/routes.dart';
+import '../../core/layout/responsive.dart';
 
 class LectureDetailScreen extends StatefulWidget {
   final String lectureId;
@@ -284,8 +285,9 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
       );
     }
 
+    final padding = Responsive.contentPadding(context);
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.fromLTRB(padding, padding, padding, padding + 24),
       children: [
         // Lecture info card
         Card(

@@ -8,6 +8,7 @@ import '../features/transcript/transcript_screen.dart';
 import '../features/summary/summary_screen.dart';
 import '../features/chat/chat_screen.dart';
 import '../features/chat/global_chat_screen.dart';
+import '../features/profile/profile_screen.dart';
 
 class AppRoutes {
   static const String login = '/';
@@ -19,6 +20,7 @@ class AppRoutes {
   static const String summary = '/summary';
   static const String chat = '/chat';
   static const String globalChat = '/global-chat';
+  static const String profile = '/profile';
 
   static Route<dynamic> generateRoute(RouteSettings settings) {
     switch (settings.name) {
@@ -66,6 +68,10 @@ class AppRoutes {
       case globalChat:
         return MaterialPageRoute(
           builder: (_) => const GlobalChatScreen(),
+        );
+      case profile:
+        return MaterialPageRoute(
+          builder: (_) => const ProfileScreen(),
         );
       default:
         return MaterialPageRoute(
