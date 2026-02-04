@@ -102,9 +102,13 @@ async def google_auth(
         result = await db.execute(select(User).where(User.email == email))
         user = result.scalar_one_or_none()
         if not user:
+            # Generate random password and truncate to 72 bytes (bcrypt limit)
+            random_password = secrets.token_urlsafe(32)
+            # Truncate to 72 bytes to avoid bcrypt error
+            password_bytes = random_password.encode('utf-8')[:72]
             user = User(
                 email=email,
-                hashed_password=hash_password(secrets.token_urlsafe(32)),
+                hashed_password=hash_password(password_bytes.decode('utf-8', errors='ignore')),
             )
             db.add(user)
             await db.flush()
