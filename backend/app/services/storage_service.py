@@ -233,7 +233,7 @@ class StorageService:
         result = await db.execute(select(Lecture).where(Lecture.id == lecture_id))
         lecture = result.scalar_one_or_none()
         if lecture:
-            db.delete(lecture)
+            await db.delete(lecture)
         for path in [self._transcript_path(lecture_id), self._summary_path(lecture_id)]:
             if path.exists():
                 os.remove(path)
