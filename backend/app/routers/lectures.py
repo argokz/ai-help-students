@@ -370,4 +370,5 @@ async def delete_lecture(
     from ..services.vector_store import vector_store
     await storage_service.delete_lecture(lecture_id, db)
     await vector_store.delete_lecture(lecture_id)
+    await db.commit()
     return {"status": "deleted", "id": lecture_id}

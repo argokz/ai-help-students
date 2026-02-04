@@ -70,10 +70,10 @@ class _LecturesScreenState extends State<LecturesScreen> {
     if (path == null || path.isEmpty) return;
 
     if (!mounted) return;
-    final titleController = TextEditingController(text: file.name);
+    final titleController = TextEditingController(text: file?.name ?? '');
     var selectedLanguage = 'auto';
 
-    final result = await showDialog<Map<String, String>>(
+    final dialogResult = await showDialog<Map<String, String>>(
       context: context,
       barrierDismissible: false,
       builder: (context) {
@@ -127,12 +127,12 @@ class _LecturesScreenState extends State<LecturesScreen> {
     );
 
     titleController.dispose();
-    if (result == null || !mounted) return;
+    if (dialogResult == null || !mounted) return;
 
     uploadQueue.addTask(
       filePath: path,
-      title: result['title']!.isEmpty ? null : result['title'],
-      language: result['language'] == 'auto' ? null : result['language'],
+      title: (dialogResult['title'] ?? '').isEmpty ? null : dialogResult['title'],
+      language: (dialogResult['language'] ?? 'auto') == 'auto' ? null : dialogResult['language'],
     );
 
     if (mounted) {
@@ -438,8 +438,17 @@ class _LecturesScreenState extends State<LecturesScreen> {
                       ),
                     );
                     if (confirm == true) {
+                      final deletedId = lecture.id;
+                      setState(() {
+                        _lectures = _lectures
+                            ?.where((l) => l.id != deletedId)
+                            .toList() ?? [];
+                        _searchResults = null;
+                        _searchQuery = '';
+                        _searchController.clear();
+                      });
                       try {
-                        await apiClient.deleteLecture(lecture.id);
+                        await apiClient.deleteLecture(deletedId);
                         if (!mounted) return;
                         await _loadLectures();
                         if (!mounted) return;
@@ -448,6 +457,7 @@ class _LecturesScreenState extends State<LecturesScreen> {
                         );
                       } catch (e) {
                         if (mounted) {
+                          await _loadLectures();
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(content: Text('Ошибка удаления: $e')),
                           );
