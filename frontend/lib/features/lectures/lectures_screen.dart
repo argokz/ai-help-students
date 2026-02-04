@@ -57,7 +57,10 @@ class _LecturesScreenState extends State<LecturesScreen> {
   }
 
   void _onLectureCompleted() {
-    if (mounted) _loadLectures();
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _loadLectures();
+    });
   }
 
   Future<void> _pickAndUploadFile() async {
@@ -143,6 +146,7 @@ class _LecturesScreenState extends State<LecturesScreen> {
   }
 
   Future<void> _loadLectures() async {
+    if (!mounted) return;
     setState(() {
       _isLoading = true;
       _error = null;
@@ -153,6 +157,7 @@ class _LecturesScreenState extends State<LecturesScreen> {
         subject: _selectedSubject,
         groupName: _selectedGroup,
       );
+      if (!mounted) return;
       setState(() {
         _lectures = result.lectures;
         _subjects = result.subjects;
@@ -160,6 +165,7 @@ class _LecturesScreenState extends State<LecturesScreen> {
         _isLoading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = e.toString();
         _isLoading = false;
@@ -170,9 +176,10 @@ class _LecturesScreenState extends State<LecturesScreen> {
   Future<void> _runSearch() async {
     final q = _searchController.text.trim();
     if (q.isEmpty) {
-      setState(() => _searchResults = null);
+      if (mounted) setState(() => _searchResults = null);
       return;
     }
+    if (!mounted) return;
     setState(() => _isSearching = true);
     try {
       final results = await apiClient.searchLectures(
@@ -180,12 +187,14 @@ class _LecturesScreenState extends State<LecturesScreen> {
         subject: _selectedSubject,
         groupName: _selectedGroup,
       );
+      if (!mounted) return;
       setState(() {
         _searchQuery = q;
         _searchResults = results;
         _isSearching = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _searchResults = [];
         _isSearching = false;

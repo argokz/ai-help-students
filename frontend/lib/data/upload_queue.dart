@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import '../models/upload_task.dart' show UploadTask, UploadTaskStatus;
 import 'api_client.dart';
 
@@ -15,6 +16,14 @@ class UploadQueueNotifier extends ChangeNotifier {
   void Function()? onLectureCompleted;
 
   List<UploadTask> get tasks => List.unmodifiable(_tasks);
+
+  /// Уведомить слушателей в следующем фрейме, чтобы не вызывать _dependents.isEmpty
+  /// при уведомлении из таймера/async (после dispose виджета).
+  void _notifyListenersSafely() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (hasListeners) notifyListeners();
+    });
+  }
 
   /// Добавить задачу и сразу запустить загрузку в фоне.
   void addTask({
@@ -37,14 +46,14 @@ class UploadQueueNotifier extends ChangeNotifier {
   void _runUpload(UploadTask task) async {
     final file = File(task.filePath);
     if (!file.existsSync()) {
-      _setFailed(task, 'Файл не найден');
+      _setFailed(task, 'Файл не найден', fromAsync: true);
       return;
     }
 
     void onProgress(int sent, int total) {
       if (total > 0) {
         task.uploadProgress = sent / total;
-        notifyListeners();
+        _notifyListenersSafely();
       }
     }
 
@@ -61,13 +70,13 @@ class UploadQueueNotifier extends ChangeNotifier {
       task.status = UploadTaskStatus.processing;
       task.processingStartedAt = DateTime.now();
       task.errorMessage = null;
-      notifyListeners();
+      _notifyListenersSafely();
 
       _startPolling(task);
     } catch (e, st) {
       task.status = UploadTaskStatus.failed;
       task.errorMessage = e.toString();
-      notifyListeners();
+      _notifyListenersSafely();
       debugPrint('Upload failed: $e $st');
     }
   }
@@ -83,7 +92,7 @@ class UploadQueueNotifier extends ChangeNotifier {
           _pollTimers[task.id]?.cancel();
           _pollTimers.remove(task.id);
           task.status = UploadTaskStatus.completed;
-          notifyListeners();
+          _notifyListenersSafely();
           onLectureCompleted?.call();
           _removeTaskLater(task);
           return;
@@ -93,12 +102,12 @@ class UploadQueueNotifier extends ChangeNotifier {
           _pollTimers.remove(task.id);
           task.status = UploadTaskStatus.failed;
           task.errorMessage = 'Ошибка обработки на сервере';
-          notifyListeners();
+          _notifyListenersSafely();
           return;
         }
         if (lecture.status == 'processing') {
           task.processingProgress = lecture.processingProgress;
-          notifyListeners();
+          _notifyListenersSafely();
         }
       } catch (_) {}
     }
@@ -111,14 +120,18 @@ class UploadQueueNotifier extends ChangeNotifier {
   void _removeTaskLater(UploadTask task) {
     Future.delayed(const Duration(milliseconds: 800), () {
       _tasks.remove(task);
-      notifyListeners();
+      _notifyListenersSafely();
     });
   }
 
-  void _setFailed(UploadTask task, String message) {
+  void _setFailed(UploadTask task, String message, {bool fromAsync = false}) {
     task.status = UploadTaskStatus.failed;
     task.errorMessage = message;
-    notifyListeners();
+    if (fromAsync) {
+      _notifyListenersSafely();
+    } else {
+      notifyListeners();
+    }
   }
 
   /// Повторить загрузку для задачи в состоянии failed.

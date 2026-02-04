@@ -144,7 +144,7 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
         subject: subject,
         groupName: groupName,
       );
-      setState(() => _lecture = updated);
+      if (mounted) setState(() => _lecture = updated);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -180,14 +180,14 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
   Future<void> _loadLecture() async {
     try {
       final lecture = await apiClient.getLecture(widget.lectureId);
-      setState(() {
+      if (mounted) setState(() {
         _lecture = lecture;
         _isLoading = false;
         _error = null;
       });
 
       // Poll for updates if still processing
-      if (lecture.isProcessing) {
+      if (mounted && lecture.isProcessing) {
         _pollTimer?.cancel();
         _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) {
           _loadLecture();
@@ -196,7 +196,7 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
         _pollTimer?.cancel();
       }
     } catch (e) {
-      setState(() {
+      if (mounted) setState(() {
         _error = e.toString();
         _isLoading = false;
       });
