@@ -52,8 +52,9 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60 * 24 * 7  # 7 days
     
-    # Google OAuth (Web Client ID for backend verification)
+    # Google OAuth (Web Client ID для проверки токена; Android Client ID опционально)
     google_client_id: str = ""
+    google_android_client_id: str = ""
     
     class Config:
         env_file = ".env"

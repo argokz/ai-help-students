@@ -1,4 +1,5 @@
 """FastAPI application entry point."""
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -8,11 +9,17 @@ from .config import settings
 from .database import init_db
 from .routers import auth, chat, lectures, summary
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Create DB tables on startup."""
-    await init_db()
+    try:
+        await init_db()
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.warning(f"Database initialization failed: {e}. App will continue but DB features may not work.")
     yield
     # shutdown if needed
 

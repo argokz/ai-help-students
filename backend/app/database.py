@@ -11,6 +11,9 @@ from .config import settings
 
 async def _ensure_database_exists() -> None:
     """Create the database if it does not exist (connect to postgres, then CREATE DATABASE)."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     url = make_url(settings.database_url)
     # url is postgresql+asyncpg://... so .rendered replaces the scheme
     dbname = url.database or "postgres"
@@ -21,21 +24,27 @@ async def _ensure_database_exists() -> None:
     user = url.username or "postgres"
     password = url.password or ""
 
-    conn = await asyncpg.connect(
-        host=host,
-        port=port,
-        user=user,
-        password=password,
-        database="postgres",
-    )
     try:
-        row = await conn.fetchval(
-            "SELECT 1 FROM pg_database WHERE datname = $1", dbname
+        conn = await asyncpg.connect(
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            database="postgres",
+            timeout=5,  # 5 second timeout
         )
-        if row is None:
-            await conn.execute(f'CREATE DATABASE "{dbname}"')
-    finally:
-        await conn.close()
+        try:
+            row = await conn.fetchval(
+                "SELECT 1 FROM pg_database WHERE datname = $1", dbname
+            )
+            if row is None:
+                await conn.execute(f'CREATE DATABASE "{dbname}"')
+                logger.info(f"Created database: {dbname}")
+        finally:
+            await conn.close()
+    except Exception as e:
+        logger.error(f"Failed to ensure database exists: {e}")
+        raise
 
 
 # Async engine: postgresql+asyncpg://user:pass@host:port/dbname
@@ -76,6 +85,14 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 async def init_db() -> None:
     """Create database if missing, then create all tables. Call on app startup."""
-    await _ensure_database_exists()
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        await _ensure_database_exists()
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("Database tables initialized")
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+        raise

@@ -22,9 +22,9 @@ def _check_lecture_owner(lecture: dict, user_id: str) -> None:
 @router.get("/{lecture_id}/summary", response_model=SummaryResponse)
 async def get_summary(
     lecture_id: str,
-    regenerate: bool = False,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    regenerate: bool = False,
 ):
     """Get structured summary. Lecture must belong to current user."""
     lecture = await storage_service.get_lecture_metadata(lecture_id, db)
