@@ -451,8 +451,14 @@ async def get_lecture_audio(
     lecture_id: str,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    download: bool = False,
 ):
-    """Скачать / прослушать аудио лекции. Только владелец."""
+    """Скачать / прослушать аудио лекции. Только владелец.
+    
+    Args:
+        download: Если True, отдаёт как вложение (для скачивания). 
+                  Если False (по умолчанию), отдаёт inline (для воспроизведения).
+    """
     lecture = await storage_service.get_lecture_metadata(lecture_id, db)
     if not lecture:
         raise HTTPException(status_code=404, detail="Lecture not found")
@@ -482,10 +488,13 @@ async def get_lecture_audio(
         ".flac": "audio/flac",
     }
     media_type = media_types.get(path_obj.suffix.lower(), "application/octet-stream")
+    
+    # Если download=True, передаём filename, что заставляет браузер добавить
+    # Content-Disposition: attachment. Если False — отдаём без filename (inline).
     return FileResponse(
         str(path_obj),
         media_type=media_type,
-        filename=lecture.get("filename") or path_obj.name,
+        filename=lecture.get("filename") or path_obj.name if download else None,
     )
 
 

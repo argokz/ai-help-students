@@ -1,4 +1,9 @@
 """Application configuration."""
+import os
+
+# Fix for Windows: Disable symlinks in HuggingFace cache (avoids WinError 1314)
+os.environ["HF_HUB_DISABLE_SYMLINKS"] = "1"
+
 from pydantic_settings import BaseSettings
 from pathlib import Path
 

@@ -31,6 +31,8 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
   StreamSubscription<PlayerState>? _playerStateSub;
   Duration _position = Duration.zero;
   Duration? _duration;
+  bool _isDownloading = false;
+  double _downloadProgress = 0;
 
   @override
   void initState() {
@@ -158,12 +160,30 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
   Future<void> _downloadAudio() async {
     if (_lecture == null) return;
     try {
+      if (mounted) {
+        setState(() {
+          _isDownloading = true;
+          _downloadProgress = 0;
+        });
+      }
       final dir = await getApplicationDocumentsDirectory();
       final name = _lecture!.filename.isNotEmpty
           ? _lecture!.filename
           : 'lecture_${_lecture!.id}.m4a';
       final savePath = '${dir.path}/$name';
-      await apiClient.downloadLectureAudio(_lecture!.id, savePath);
+      
+      await apiClient.downloadLectureAudio(
+        _lecture!.id, 
+        savePath,
+        onReceiveProgress: (received, total) {
+          if (total != -1 && mounted) {
+            setState(() {
+              _downloadProgress = received / total;
+            });
+          }
+        },
+      );
+      
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Сохранено: $name')),
@@ -174,6 +194,12 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Ошибка скачивания: $e')),
         );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isDownloading = false;
+        });
       }
     }
   }
@@ -360,11 +386,21 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.download),
-                      tooltip: 'Скачать',
-                      onPressed: _downloadAudio,
-                    ),
+                    _isDownloading
+                        ? Container(
+                            margin: const EdgeInsets.only(right: 8),
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(
+                              value: _downloadProgress,
+                              strokeWidth: 3,
+                            ),
+                          )
+                        : IconButton(
+                            icon: const Icon(Icons.download),
+                            tooltip: 'Скачать',
+                            onPressed: _downloadAudio,
+                          ),
                   ],
                 ),
                 const SizedBox(height: 12),

@@ -110,8 +110,16 @@ class ApiClient {
   }
 
   /// Скачать аудио лекции в файл [savePath]. Возвращает путь при успехе.
-  Future<String> downloadLectureAudio(String lectureId, String savePath) async {
-    await _dio.download('/lectures/$lectureId/audio', savePath);
+  Future<String> downloadLectureAudio(
+    String lectureId, 
+    String savePath, {
+    void Function(int, int)? onReceiveProgress,
+  }) async {
+    await _dio.download(
+      '/lectures/$lectureId/audio', 
+      savePath,
+      onReceiveProgress: onReceiveProgress,
+    );
     return savePath;
   }
 
