@@ -29,7 +29,7 @@ class _LocalRecordingsScreenState extends State<LocalRecordingsScreen> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    final list = await localRecordingsRepository.getAll();
+    final list = await localRecordingsRepository.getAllWithDiscovered();
     if (mounted) setState(() {
       _list = list;
       _loading = false;
