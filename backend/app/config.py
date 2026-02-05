@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     upload_dir: Path = Path("data/uploads")
     
     # ASR settings (скорость: small/base + cuda + beam_size=1)
-    whisper_model: str = "large-v3"  # base, small, medium, large-v3 — меньше = быстрее
+    whisper_model: str = "distil-large-v3"  # base, small, medium, large-v3 — меньше = быстрее
     whisper_device: str = "cpu"  # cuda — сильно быстрее при наличии GPU
     whisper_compute_type: str = "int8"  # float16 на cuda быстрее
     whisper_beam_size: int = 5  # 1 — быстрее, 5 — качество по умолчанию
