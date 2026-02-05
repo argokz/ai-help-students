@@ -102,6 +102,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               const SizedBox(height: 8),
               ListTile(
+                leading: Icon(Icons.folder_outlined, color: theme.colorScheme.primary),
+                title: const Text('Локальные записи'),
+                trailing: const Icon(Icons.chevron_right),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                onTap: () {
+                  Navigator.pushNamed(context, AppRoutes.localRecordings);
+                },
+              ),
+              const SizedBox(height: 8),
+              ListTile(
                 leading: Icon(Icons.chat_bubble_outline, color: theme.colorScheme.primary),
                 title: const Text('Общий чат'),
                 trailing: const Icon(Icons.chevron_right),

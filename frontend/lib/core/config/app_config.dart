@@ -24,6 +24,12 @@ class AppConfig {
   /// Receive timeout in seconds (for long operations like transcription)
   static const int receiveTimeout = 120;
   
+  /// Send timeout for upload (large files). In seconds.
+  static const int uploadSendTimeout = 600;
+  
+  /// Receive timeout for upload response. In seconds.
+  static const int uploadReceiveTimeout = 180;
+  
   // ===========================================
   // Google Sign-In
   // ===========================================

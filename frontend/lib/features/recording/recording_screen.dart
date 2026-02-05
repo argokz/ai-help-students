@@ -4,7 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:share_plus/share_plus.dart';
+import '../../models/local_recording.dart';
 import '../../data/upload_queue.dart';
+import '../../data/local_recordings_repository.dart';
 import '../../app/routes.dart';
 
 class RecordingScreen extends StatefulWidget {
@@ -143,12 +146,21 @@ class _RecordingScreenState extends State<RecordingScreen> {
             },
             child: const Text('Удалить'),
           ),
+          TextButton.icon(
+            onPressed: () async {
+              if (_recordingPath == null) return;
+              final f = File(_recordingPath!);
+              if (f.existsSync()) await Share.shareXFiles([XFile(_recordingPath!)], text: _titleController.text.isEmpty ? null : _titleController.text);
+            },
+            icon: const Icon(Icons.save_alt, size: 18),
+            label: const Text('Сохранить копию'),
+          ),
           FilledButton(
             onPressed: () {
               Navigator.of(context).pop();
               _enqueueAndGoToLectures();
             },
-            child: const Text('Загрузить'),
+            child: const Text('Загрузить на сервер'),
           ),
         ],
       ),
@@ -168,15 +180,26 @@ class _RecordingScreenState extends State<RecordingScreen> {
     });
   }
 
-  /// Добавляет запись в очередь загрузки и переходит к списку лекций.
-  /// Загрузка идёт в фоне; можно сразу записывать следующую лекцию.
+  /// Сохраняет запись в локальный список (файл не удаляется при ошибке загрузки),
+  /// добавляет в очередь загрузки и переходит к списку лекций.
   void _enqueueAndGoToLectures() {
     if (_recordingPath == null) return;
 
+    final title = _titleController.text.trim();
+    final language = _selectedLanguage == 'auto' ? null : _selectedLanguage;
+
+    final local = LocalRecording(
+      path: _recordingPath!,
+      title: title.isEmpty ? '' : title,
+      language: language,
+      createdAtMillis: DateTime.now().millisecondsSinceEpoch,
+    );
+    localRecordingsRepository.add(local);
+
     uploadQueue.addTask(
       filePath: _recordingPath!,
-      title: _titleController.text.isEmpty ? null : _titleController.text,
-      language: _selectedLanguage == 'auto' ? null : _selectedLanguage,
+      title: title.isEmpty ? null : title,
+      language: language,
     );
 
     _recordingPath = null;
@@ -188,7 +211,7 @@ class _RecordingScreenState extends State<RecordingScreen> {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Добавлено в очередь. Загрузка в фоне. Можно записать ещё.'),
+          content: Text('Запись сохранена локально и добавлена в очередь загрузки. При ошибке можно повторить из «Локальные записи».'),
         ),
       );
       Navigator.of(context).pushReplacementNamed(AppRoutes.lectures);

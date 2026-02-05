@@ -116,6 +116,7 @@ class ApiClient {
   }
 
   /// [onSendProgress] вызывается с (отправлено байт, всего байт).
+  /// Для больших файлов используются увеличенные таймауты и повтор при обрыве.
   Future<Lecture> uploadLecture({
     required File audioFile,
     String? title,
@@ -131,16 +132,32 @@ class ApiClient {
       if (language != null) 'language': language,
     });
 
-    final response = await _dio.post(
-      '/lectures/upload',
-      data: formData,
-      options: Options(
-        headers: {'Content-Type': 'multipart/form-data'},
-      ),
-      onSendProgress: onSendProgress,
-    );
-
-    return Lecture.fromJson(response.data as Map<String, dynamic>);
+    const maxAttempts = 3;
+    Exception? lastError;
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        final response = await _dio.post(
+          '/lectures/upload',
+          data: formData,
+          options: Options(
+            headers: {'Content-Type': 'multipart/form-data'},
+            sendTimeout: Duration(seconds: AppConfig.uploadSendTimeout),
+            receiveTimeout: Duration(seconds: AppConfig.uploadReceiveTimeout),
+          ),
+          onSendProgress: onSendProgress,
+        );
+        return Lecture.fromJson(response.data as Map<String, dynamic>);
+      } on DioException catch (e) {
+        lastError = e;
+        final isRetryable = e.type == DioExceptionType.connectionError ||
+            e.type == DioExceptionType.connectionTimeout ||
+            e.type == DioExceptionType.sendTimeout ||
+            (e.error is SocketException);
+        if (!isRetryable || attempt == maxAttempts) rethrow;
+        await Future<void>.delayed(Duration(seconds: attempt * 2));
+      }
+    }
+    throw lastError ?? StateError('Upload failed');
   }
 
   Future<void> deleteLecture(String id) async {

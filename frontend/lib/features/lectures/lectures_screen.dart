@@ -335,6 +335,14 @@ class _LecturesScreenState extends State<LecturesScreen> {
               onTap: () => Navigator.pop(context),
             ),
             ListTile(
+              leading: const Icon(Icons.folder_outlined),
+              title: const Text('Локальные записи'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.pushNamed(context, AppRoutes.localRecordings);
+              },
+            ),
+            ListTile(
               leading: const Icon(Icons.chat_bubble_outline),
               title: const Text('Общий чат'),
               onTap: () {

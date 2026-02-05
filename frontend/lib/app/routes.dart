@@ -9,6 +9,7 @@ import '../features/summary/summary_screen.dart';
 import '../features/chat/chat_screen.dart';
 import '../features/chat/global_chat_screen.dart';
 import '../features/profile/profile_screen.dart';
+import '../features/recordings/local_recordings_screen.dart';
 
 class AppRoutes {
   static const String login = '/';
@@ -16,6 +17,7 @@ class AppRoutes {
   static const String lectures = '/lectures';
   static const String lectureDetail = '/lecture';
   static const String recording = '/recording';
+  static const String localRecordings = '/local-recordings';
   static const String transcript = '/transcript';
   static const String summary = '/summary';
   static const String chat = '/chat';
@@ -47,7 +49,10 @@ class AppRoutes {
         return MaterialPageRoute(
           builder: (_) => const RecordingScreen(),
         );
-      
+      case localRecordings:
+        return MaterialPageRoute(
+          builder: (_) => const LocalRecordingsScreen(),
+        );
       case transcript:
         final lectureId = settings.arguments as String;
         return MaterialPageRoute(

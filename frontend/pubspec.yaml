@@ -40,6 +40,9 @@ dependencies:
   # Local storage
   shared_preferences: ^2.2.2
 
+  # Share / save file
+  share_plus: ^10.0.0
+
   # Google Sign-In
   google_sign_in: ^6.2.1
 

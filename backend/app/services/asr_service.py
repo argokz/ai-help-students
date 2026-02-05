@@ -81,7 +81,7 @@ class ASRService:
             beam_size=settings.whisper_beam_size,
             condition_on_previous_text=settings.whisper_condition_on_previous_text,
             vad_filter=True,
-            vad_parameters=dict(min_silence_duration_ms=500),
+            vad_parameters=dict(min_silence_duration_ms=2000),
             word_timestamps=False,
         )
 

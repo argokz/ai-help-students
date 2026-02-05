@@ -2,6 +2,7 @@
 import asyncio
 import uuid
 import aiofiles
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Optional
@@ -22,6 +23,14 @@ from ..models import (
     TranscriptResponse,
     TranscriptSegment,
 )
+
+class UploadInitRequest(PydanticBaseModel):
+    filename: str
+    total_chunks: Optional[int] = None
+    total_size: Optional[int] = None
+
+class UploadInitResponse(PydanticBaseModel):
+    upload_id: str
 from ..services.asr_service import asr_service
 from ..services.storage_service import storage_service
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,6 +48,131 @@ def _get_audio_duration_sec(audio_path: str) -> Optional[float]:
     except Exception:
         pass
     return None
+
+
+@router.post("/upload/init", response_model=UploadInitResponse)
+async def init_upload(
+    request: UploadInitRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    """Start a resumable upload session."""
+    upload_id = str(uuid.uuid4())
+    upload_path = settings.upload_dir / upload_id
+    upload_path.mkdir(parents=True, exist_ok=True)
+    return UploadInitResponse(upload_id=upload_id)
+
+
+@router.post("/upload/chunk/{upload_id}")
+async def upload_chunk(
+    upload_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    chunk_index: int = Form(...),
+    file: UploadFile = File(...),
+):
+    """Upload a single chunk of the file."""
+    upload_path = settings.upload_dir / upload_id
+    if not upload_path.exists():
+        raise HTTPException(status_code=404, detail="Upload session not found")
+    
+    chunk_path = upload_path / f"{chunk_index}.part"
+    async with aiofiles.open(chunk_path, "wb") as f:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            await f.write(chunk)
+    return {"status": "ok", "chunk_index": chunk_index}
+
+
+@router.post("/upload/complete/{upload_id}", response_model=LectureResponse)
+async def complete_upload(
+    upload_id: str,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    title: Optional[str] = Form(None),
+    language: Optional[str] = Form(None),
+    subject: Optional[str] = Form(None),
+    group_name: Optional[str] = Form(None),
+    filename: Optional[str] = Form(None),
+):
+    """Assemble chunks and start processing."""
+    upload_path = settings.upload_dir / upload_id
+    if not upload_path.exists():
+        raise HTTPException(status_code=404, detail="Upload session not found")
+    
+    # Sort chunks
+    chunks = sorted(list(upload_path.glob("*.part")), key=lambda p: int(p.stem))
+    if not chunks:
+        # Cleanup empty folder
+        shutil.rmtree(upload_path)
+        raise HTTPException(status_code=400, detail="No chunks found")
+        
+    if not filename:
+        filename = f"upload_{upload_id}.mp3"
+
+    allowed_extensions = {".mp3", ".wav", ".m4a", ".ogg", ".webm", ".flac"}
+    file_ext = Path(filename).suffix.lower()
+    if file_ext not in allowed_extensions:
+         if not file_ext: 
+             file_ext = ".mp3" # default
+         else:
+             raise HTTPException(
+                status_code=400, 
+                detail=f"Unsupported file format. Allowed: {', '.join(allowed_extensions)}"
+            )
+
+    lecture_id = upload_id 
+    final_path = settings.audio_dir / f"{lecture_id}{file_ext}"
+    
+    # Merge chunks
+    async with aiofiles.open(final_path, "wb") as outfile:
+        for chunk_path in chunks:
+            async with aiofiles.open(chunk_path, "rb") as infile:
+                while True:
+                    chunk = await infile.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    await outfile.write(chunk)
+    
+    # Clean up
+    shutil.rmtree(upload_path)
+    
+    lecture_title = title or filename or f"Лекция {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+    lecture_data = {
+        "id": lecture_id,
+        "title": lecture_title,
+        "filename": filename,
+        "audio_path": str(final_path),
+        "language": language,
+        "status": "pending",
+        "subject": subject,
+        "group_name": group_name,
+    }
+
+    await storage_service.save_lecture_metadata(lecture_id, current_user.id, lecture_data, db)
+
+    background_tasks.add_task(
+        process_lecture_transcription,
+        lecture_id,
+        str(final_path),
+        language,
+    )
+
+    return LectureResponse(
+        id=lecture_id,
+        title=lecture_title,
+        filename=filename,
+        duration=None,
+        language=language,
+        status="pending",
+        created_at=datetime.utcnow(),
+        has_transcript=False,
+        has_summary=False,
+        processing_progress=None,
+        subject=subject,
+        group_name=group_name,
+    )
 
 
 @router.post("/upload", response_model=LectureResponse)
