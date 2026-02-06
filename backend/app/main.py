@@ -10,14 +10,6 @@ from .config import settings
 from .database import init_db
 from .routers import auth, chat, chat_global, lectures, summary, notes, calendar, tasks
 
-# ...
-
-app.include_router(
-    calendar.router,
-    prefix=f"{settings.api_prefix}/calendar",
-    tags=["calendar"],
-)
-
 # Единая настройка логирования для всего приложения
 def _setup_logging() -> None:
     level = getattr(logging, settings.log_level.upper(), logging.INFO)
@@ -108,7 +100,11 @@ app.include_router(
     prefix=f"{settings.api_prefix}/notes",
     tags=["notes"],
 )
-
+app.include_router(
+    calendar.router,
+    prefix=f"{settings.api_prefix}/calendar",
+    tags=["calendar"],
+)
 app.include_router(
     chat.router,
     prefix=f"{settings.api_prefix}/lectures",
