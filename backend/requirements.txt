@@ -36,3 +36,10 @@ pydantic-settings==2.1.0
 python-dotenv==1.0.1
 aiofiles==23.2.1
 email-validator==2.3.0
+
+# Schedule parsing
+pandas>=2.0.0
+openpyxl>=3.1.0
+google-api-python-client>=2.0.0
+google-auth-oauthlib>=1.0.0
+google-auth-httplib2>=0.1.02

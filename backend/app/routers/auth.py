@@ -136,3 +136,39 @@ async def me(current_user: User = Depends(get_current_user)):
         email=current_user.email,
         created_at=current_user.created_at.isoformat(),
     )
+@router.post("/google/link-calendar")
+async def link_google_calendar(
+    data: dict, # {"code": "server_auth_code"}
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Link Google Calendar by exchanging auth code for refresh token."""
+    import aiohttp
+    
+    code = data.get("code")
+    if not code:
+        raise HTTPException(400, "Auth code is required")
+    
+    # Exchange code for tokens
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "code": code,
+                "client_id": settings.google_client_id,
+                "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
+                "grant_type": "authorization_code",
+                "redirect_uri": "", # Should be empty for serverAuthCode from mobile
+            }
+        ) as resp:
+            token_data = await resp.json()
+            
+    if "refresh_token" not in token_data:
+        # Sometimes Google doesn't return refresh_token if it was already granted
+        # unless prompt=consent is used.
+        error_detail = token_data.get("error_description", token_data.get("error", "Unknown error"))
+        raise HTTPException(400, f"Failed to get refresh token: {error_detail}")
+    
+    current_user.google_refresh_token = token_data["refresh_token"]
+    await db.commit()
+    return {"ok": True}

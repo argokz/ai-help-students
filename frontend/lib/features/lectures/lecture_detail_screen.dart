@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:path_provider/path_provider.dart';
@@ -7,6 +8,8 @@ import '../../data/api_client.dart';
 import '../../data/auth_repository.dart';
 import '../../app/routes.dart';
 import '../../core/layout/responsive.dart';
+import '../../core/utils/error_handler.dart';
+import 'task_extraction_widget.dart';
 
 class LectureDetailScreen extends StatefulWidget {
   final String lectureId;
@@ -22,8 +25,12 @@ class LectureDetailScreen extends StatefulWidget {
 
 class _LectureDetailScreenState extends State<LectureDetailScreen> {
   Lecture? _lecture;
-  bool _isLoading = true;
+  bool _isLoadingAudio = false;
   String? _error;
+
+  List<Map<String, dynamic>> _extractedTasks = [];
+  bool _isExtractingTasks = false;
+  bool _tasksExtracted = false;
   Timer? _pollTimer;
   final AudioPlayer _audioPlayer = AudioPlayer();
   StreamSubscription<Duration>? _positionSub;
@@ -65,17 +72,32 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
       if (_audioPlayer.playing) {
         await _audioPlayer.pause();
       } else {
-        final token = await authRepository.getToken();
-        if (token == null || token.isEmpty) return;
-        final url = ApiClient.lectureAudioUrl(_lecture!.id);
-        await _audioPlayer.setUrl(url, headers: {'Authorization': 'Bearer $token'});
+        // Check for local file first
+        final dir = await getApplicationDocumentsDirectory();
+        final name = _lecture!.filename.isNotEmpty
+            ? _lecture!.filename
+            : 'lecture_${_lecture!.id}.m4a';
+        final localFile = File('${dir.path}/$name');
+
+        if (localFile.existsSync()) {
+             // Play locally
+             await _audioPlayer.setFilePath(localFile.path);
+        } else {
+             // Stream from server
+            final token = await authRepository.getToken();
+            if (token == null || token.isEmpty) return;
+            final url = ApiClient.lectureAudioUrl(_lecture!.id);
+            // LockCachingAudioSource can be used for caching, 
+            // but requires more setup. For now, stream or play local if downloaded.
+            await _audioPlayer.setUrl(url, headers: {'Authorization': 'Bearer $token'});
+        }
         await _audioPlayer.play();
       }
       if (mounted) setState(() {});
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Ошибка воспроизведения: $e')),
+          SnackBar(content: Text('Ошибка воспроизведения: ${ErrorHandler.getMessage(e)}')),
         );
       }
     }
@@ -151,7 +173,7 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Ошибка: $e')),
+          SnackBar(content: Text('Ошибка: ${ErrorHandler.getMessage(e)}')),
         );
       }
     }
@@ -192,7 +214,7 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Ошибка скачивания: $e')),
+          SnackBar(content: Text('Ошибка скачивания: ${ErrorHandler.getMessage(e)}')),
         );
       }
     } finally {
@@ -223,10 +245,12 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
         _pollTimer?.cancel();
       }
     } catch (e) {
-      if (mounted) setState(() {
-        _error = e.toString();
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _error = ErrorHandler.getMessage(e);
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -493,6 +517,14 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
               arguments: lecture.id,
             );
           },
+        ),
+
+        const SizedBox(height: 16),
+
+        // AI Task Extraction
+        TaskExtractionWidget(
+          lectureId: lecture.id,
+          hasTranscript: lecture.hasTranscript,
         ),
       ],
     );

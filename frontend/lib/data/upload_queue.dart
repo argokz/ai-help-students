@@ -26,11 +26,20 @@ class UploadQueueNotifier extends ChangeNotifier {
   }
 
   /// Добавить задачу и сразу запустить загрузку в фоне.
+  /// Если для того же [filePath] уже есть задача в очереди: при статусе failed — повторяем её (retry), иначе не дублируем.
   void addTask({
     required String filePath,
     String? title,
     String? language,
   }) {
+    for (final t in _tasks) {
+      if (t.filePath == filePath) {
+        if (t.status == UploadTaskStatus.failed) {
+          retry(t);
+        }
+        return;
+      }
+    }
     final id = '${DateTime.now().millisecondsSinceEpoch}_${filePath.hashCode}';
     final task = UploadTask(
       id: id,

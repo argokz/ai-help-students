@@ -46,6 +46,13 @@ dependencies:
   # Google Sign-In
   google_sign_in: ^6.2.1
 
+  # Calendar
+  table_calendar: ^3.0.9
+
+  # Local notifications
+  flutter_local_notifications: ^17.0.0
+  timezone: ^0.9.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

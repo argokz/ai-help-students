@@ -225,8 +225,13 @@ class StorageService:
         if not path.exists():
             return None
         async with aiofiles.open(path, "r") as f:
-            content = await f.read()
+            content = (await f.read()).strip()
+        if not content:
+            return None
+        try:
             return json.loads(content)
+        except json.JSONDecodeError:
+            return None
 
     async def delete_lecture(self, lecture_id: str, db: AsyncSession) -> None:
         """Delete lecture from DB and remove files. Commit делает get_db."""

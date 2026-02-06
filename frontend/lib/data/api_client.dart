@@ -7,6 +7,9 @@ import '../models/summary.dart';
 import '../models/chat_message.dart';
 import '../models/lecture.dart' show Lecture, LectureSearchResult;
 import '../models/auth.dart';
+import '../models/note.dart';
+import '../models/calendar_event.dart';
+import '../models/task.dart';
 import 'auth_repository.dart';
 
 class ApiClient {
@@ -260,6 +263,185 @@ class ApiClient {
       },
     );
     return GlobalChatResponse.fromJson(response.data as Map<String, dynamic>);
+  }
+  // Notes
+
+  Future<List<Note>> getNotes({String? lectureId, int limit = 50, int offset = 0}) async {
+    final response = await _dio.get(
+      '/notes',
+      queryParameters: {
+        if (lectureId != null) 'lecture_id': lectureId,
+        'limit': limit,
+        'offset': offset,
+      },
+    );
+    return (response.data as List).map((e) => Note.fromJson(e)).toList();
+  }
+
+  Future<Note> createNote({
+    String? title,
+    String? content,
+    String? lectureId,
+  }) async {
+    final response = await _dio.post(
+      '/notes',
+      data: {
+        'title': title,
+        'content': content,
+        'lecture_id': lectureId,
+      },
+    );
+    return Note.fromJson(response.data);
+  }
+
+  Future<Note> getNote(String id) async {
+    final response = await _dio.get('/notes/$id');
+    return Note.fromJson(response.data);
+  }
+
+  Future<Note> updateNote(String id, {String? title, String? content, String? lectureId}) async {
+    final response = await _dio.patch(
+      '/notes/$id',
+      data: {
+        if (title != null) 'title': title,
+        if (content != null) 'content': content,
+        if (lectureId != null) 'lecture_id': lectureId,
+      },
+    );
+    return Note.fromJson(response.data);
+  }
+
+  Future<void> deleteNote(String id) async {
+    await _dio.delete('/notes/$id');
+  }
+
+  Future<Note> uploadNoteAudio(String id, File audioFile) async {
+    final formData = FormData.fromMap({
+      'file': await MultipartFile.fromFile(
+        audioFile.path,
+        filename: 'audio.m4a', // Server uses this extension logic
+      ),
+    });
+    final response = await _dio.post(
+      '/notes/$id/audio',
+      data: formData,
+    );
+    return Note.fromJson(response.data);
+  }
+  
+  static String noteAudioUrl(String noteId) {
+    return '${AppConfig.apiBaseUrl}/notes/$noteId/audio';
+  }
+
+  Future<Note> uploadNoteAttachment(String id, File file) async {
+    final formData = FormData.fromMap({
+      'file': await MultipartFile.fromFile(
+        file.path,
+        filename: file.path.split('/').last,
+      ),
+    });
+    final response = await _dio.post(
+      '/notes/$id/attachments',
+      data: formData,
+    );
+    return Note.fromJson(response.data);
+  }
+  
+  static String attachmentUrl(String noteId, String attachmentId) {
+    return '${AppConfig.apiBaseUrl}/notes/$noteId/attachments/$attachmentId';
+  }
+
+  // Calendar
+
+  Future<List<CalendarEvent>> getCalendarEvents({
+    DateTime? startDate,
+    DateTime? endDate,
+  }) async {
+    final response = await _dio.get(
+      '/calendar',
+      queryParameters: {
+        if (startDate != null) 'start_date': startDate.toIso8601String(),
+        if (endDate != null) 'end_date': endDate.toIso8601String(),
+      },
+    );
+    return (response.data as List).map((e) => CalendarEvent.fromJson(e)).toList();
+  }
+
+  Future<CalendarEvent> createCalendarEvent(CalendarEvent event) async {
+    final response = await _dio.post('/calendar', data: event.toJson());
+    return CalendarEvent.fromJson(response.data);
+  }
+
+  Future<CalendarEvent> getCalendarEvent(String id) async {
+    final response = await _dio.get('/calendar/$id');
+    return CalendarEvent.fromJson(response.data);
+  }
+
+  Future<CalendarEvent> updateCalendarEvent(String id, Map<String, dynamic> updates) async {
+    final response = await _dio.patch('/calendar/$id', data: updates);
+    return CalendarEvent.fromJson(response.data);
+  }
+
+  Future<void> deleteCalendarEvent(String id) async {
+    await _dio.delete('/calendar/$id');
+  }
+
+  // Task Extraction
+
+  Future<Map<String, dynamic>> extractTasksFromLecture(String lectureId) async {
+    final response = await _dio.post('/lectures/$lectureId/extract-tasks');
+    return response.data as Map<String, dynamic>;
+  }
+
+  Future<CalendarEvent> createEventFromTask(Map<String, dynamic> taskData) async {
+    final response = await _dio.post('/calendar/create-from-task', data: taskData);
+    return CalendarEvent.fromJson(response.data);
+  }
+
+  // Tasks (To-Do List)
+
+  Future<List<Task>> getTasks({
+    bool? completed,
+    String? lectureId,
+    String? priority,
+  }) async {
+    final response = await _dio.get(
+      '/tasks',
+      queryParameters: {
+        if (completed != null) 'completed': completed,
+        if (lectureId != null) 'lecture_id': lectureId,
+        if (priority != null) 'priority': priority,
+      },
+    );
+    return (response.data as List).map((e) => Task.fromJson(e)).toList();
+  }
+
+  Future<Task> createTask(Task task) async {
+    final response = await _dio.post('/tasks', data: task.toJson());
+    return Task.fromJson(response.data);
+  }
+
+  Future<Task> updateTask(String id, Map<String, dynamic> updates) async {
+    final response = await _dio.patch('/tasks/$id', data: updates);
+    return Task.fromJson(response.data);
+  }
+
+  Future<Task> toggleTaskCompletion(String id) async {
+    final response = await _dio.post('/tasks/$id/toggle');
+    return Task.fromJson(response.data);
+  }
+
+  Future<void> deleteTask(String id) async {
+    await _dio.delete('/tasks/$id');
+  }
+
+  Future<Task> createTaskFromExtracted(Map<String, dynamic> taskData) async {
+    final response = await _dio.post('/tasks/from-extracted', data: taskData);
+    return Task.fromJson(response.data);
+  }
+
+  Future<void> linkGoogleCalendar(String serverAuthCode) async {
+    await _dio.post('/google/link-calendar', data: {'code': serverAuthCode});
   }
 }
 

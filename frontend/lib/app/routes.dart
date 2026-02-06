@@ -10,6 +10,12 @@ import '../features/chat/chat_screen.dart';
 import '../features/chat/global_chat_screen.dart';
 import '../features/profile/profile_screen.dart';
 import '../features/recordings/local_recordings_screen.dart';
+import '../features/notes/notes_screen.dart';
+import '../features/notes/note_detail_screen.dart';
+import '../features/calendar/calendar_screen.dart';
+import '../features/calendar/calendar_event_detail_screen.dart';
+import '../features/tasks/tasks_screen.dart';
+import '../features/tasks/task_detail_screen.dart';
 
 class AppRoutes {
   static const String login = '/';
@@ -23,6 +29,12 @@ class AppRoutes {
   static const String chat = '/chat';
   static const String globalChat = '/global-chat';
   static const String profile = '/profile';
+  static const String notes = '/notes';
+  static const String noteDetail = '/note-detail';
+  static const String calendar = '/calendar';
+  static const String calendarEventDetail = '/calendar-event-detail';
+  static const String tasks = '/tasks';
+  static const String taskDetail = '/task-detail';
 
   static Route<dynamic> generateRoute(RouteSettings settings) {
     switch (settings.name) {
@@ -77,6 +89,36 @@ class AppRoutes {
       case profile:
         return MaterialPageRoute(
           builder: (_) => const ProfileScreen(),
+        );
+      case notes:
+        return MaterialPageRoute(
+          builder: (_) => const NotesScreen(),
+        );
+      case noteDetail:
+        final args = settings.arguments as String?; // noteId or null
+        return MaterialPageRoute(
+          builder: (_) => NoteDetailScreen(noteId: args),
+        );
+      case calendar:
+        return MaterialPageRoute(
+          builder: (_) => const CalendarScreen(),
+        );
+      case calendarEventDetail:
+        final args = settings.arguments as Map<String, dynamic>?;
+        return MaterialPageRoute(
+          builder: (_) => CalendarEventDetailScreen(
+            eventId: args?['eventId'],
+            preselectedDate: args?['date'],
+          ),
+        );
+      case tasks:
+        return MaterialPageRoute(
+          builder: (_) => const TasksScreen(),
+        );
+      case taskDetail:
+        final args = settings.arguments as String?; // taskId
+        return MaterialPageRoute(
+          builder: (_) => TaskDetailScreen(taskId: args),
         );
       default:
         return MaterialPageRoute(

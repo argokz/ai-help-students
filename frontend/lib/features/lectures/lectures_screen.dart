@@ -8,6 +8,7 @@ import '../../data/auth_repository.dart';
 import '../../data/upload_queue.dart';
 import '../../app/routes.dart';
 import '../../core/layout/responsive.dart';
+import '../../core/utils/error_handler.dart';
 
 class LecturesScreen extends StatefulWidget {
   const LecturesScreen({super.key});
@@ -185,7 +186,7 @@ class _LecturesScreenState extends State<LecturesScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = ErrorHandler.getMessage(e);
         _isLoading = false;
       });
     }
@@ -338,8 +339,31 @@ class _LecturesScreenState extends State<LecturesScreen> {
               leading: const Icon(Icons.folder_outlined),
               title: const Text('Локальные записи'),
               onTap: () {
-                Navigator.pop(context);
                 Navigator.pushNamed(context, AppRoutes.localRecordings);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.note_alt_outlined),
+              title: const Text('Заметки'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.pushNamed(context, AppRoutes.notes);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.calendar_today),
+              title: const Text('Календарь'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.pushNamed(context, AppRoutes.calendar);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.check_circle_outline),
+              title: const Text('Задачи'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.pushNamed(context, AppRoutes.tasks);
               },
             ),
             ListTile(
@@ -661,7 +685,7 @@ class _LecturesScreenState extends State<LecturesScreen> {
       if (mounted) {
         await _loadLectures();
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Ошибка удаления: $e')),
+          SnackBar(content: Text('Ошибка удаления: ${ErrorHandler.getMessage(e)}')),
         );
       }
     }

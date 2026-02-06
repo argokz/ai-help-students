@@ -1,8 +1,11 @@
 """ASR service using faster-whisper for speech-to-text."""
 import asyncio
+import logging
 from typing import Callable, Optional
 from ..config import settings
 
+
+logger = logging.getLogger(__name__)
 
 class ASRService:
     """
@@ -22,11 +25,13 @@ class ASRService:
         if self._model is None:
             from faster_whisper import WhisperModel
             
+            logger.info(f"Loading Whisper model: {settings.whisper_model} on {settings.whisper_device}")
             self._model = WhisperModel(
                 settings.whisper_model,
                 device=settings.whisper_device,
                 compute_type=settings.whisper_compute_type,
             )
+            logger.info("Whisper model loaded successfully")
         return self._model
     
     async def transcribe(

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../core/theme/app_theme.dart';
 import 'routes.dart';
+import '../features/recording/recording_overlay.dart';
 
 class LectureAssistantApp extends StatelessWidget {
   const LectureAssistantApp({super.key});
@@ -15,6 +16,9 @@ class LectureAssistantApp extends StatelessWidget {
       themeMode: ThemeMode.system,
       initialRoute: AppRoutes.login,
       onGenerateRoute: AppRoutes.generateRoute,
+      builder: (context, child) {
+        return RecordingOverlay(child: child!);
+      },
     );
   }
 }

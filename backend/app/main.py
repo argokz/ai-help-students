@@ -1,5 +1,6 @@
 """FastAPI application entry point."""
 import logging
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -7,8 +8,33 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .database import init_db
-from .routers import auth, chat, chat_global, lectures, summary
+from .routers import auth, chat, chat_global, lectures, summary, notes, calendar, tasks
 
+# ...
+
+app.include_router(
+    calendar.router,
+    prefix=f"{settings.api_prefix}/calendar",
+    tags=["calendar"],
+)
+
+# Единая настройка логирования для всего приложения
+def _setup_logging() -> None:
+    level = getattr(logging, settings.log_level.upper(), logging.INFO)
+    fmt = "%(asctime)s | %(levelname)-7s | %(name)s | %(message)s"
+    datefmt = "%Y-%m-%d %H:%M:%S"
+    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
+    if settings.log_file:
+        try:
+            handlers.append(logging.FileHandler(settings.log_file, encoding="utf-8"))
+        except OSError as e:
+            sys.stderr.write(f"Could not open log file {settings.log_file}: {e}\n")
+    for h in handlers:
+        h.setFormatter(logging.Formatter(fmt, datefmt=datefmt))
+    logging.basicConfig(level=level, handlers=handlers, force=True)
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)  # меньше шума от access-логов
+
+_setup_logging()
 logger = logging.getLogger(__name__)
 
 
@@ -77,6 +103,11 @@ app.include_router(
     prefix=f"{settings.api_prefix}/lectures",
     tags=["lectures"],
 )
+app.include_router(
+    notes.router,
+    prefix=f"{settings.api_prefix}/notes",
+    tags=["notes"],
+)
 
 app.include_router(
     chat.router,
@@ -93,4 +124,10 @@ app.include_router(
     chat_global.router,
     prefix=f"{settings.api_prefix}/chat",
     tags=["chat"],
+)
+
+app.include_router(
+    tasks.router,
+    prefix=f"{settings.api_prefix}/tasks",
+    tags=["tasks"],
 )

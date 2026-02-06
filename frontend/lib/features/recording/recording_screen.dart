@@ -1,13 +1,13 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../models/local_recording.dart';
 import '../../data/upload_queue.dart';
 import '../../data/local_recordings_repository.dart';
+import '../../data/recording_service.dart';
 import '../../app/routes.dart';
 
 class RecordingScreen extends StatefulWidget {
@@ -18,22 +18,24 @@ class RecordingScreen extends StatefulWidget {
 }
 
 class _RecordingScreenState extends State<RecordingScreen> {
-  final AudioRecorder _recorder = AudioRecorder();
-  bool _isRecording = false;
-  bool _isPaused = false;
-  String? _recordingPath;
-  Duration _duration = Duration.zero;
-  Timer? _timer;
-  
   final TextEditingController _titleController = TextEditingController();
   String _selectedLanguage = 'auto';
 
   @override
+  void initState() {
+    super.initState();
+    recordingService.addListener(_onServiceUpdate);
+  }
+
+  @override
   void dispose() {
-    _timer?.cancel();
-    _recorder.dispose();
+    recordingService.removeListener(_onServiceUpdate);
     _titleController.dispose();
     super.dispose();
+  }
+
+  void _onServiceUpdate() {
+    if (mounted) setState(() {});
   }
 
   Future<bool> _requestPermissions() async {
@@ -50,61 +52,25 @@ class _RecordingScreenState extends State<RecordingScreen> {
       }
       return;
     }
-
-    final directory = await getApplicationDocumentsDirectory();
-    final timestamp = DateTime.now().millisecondsSinceEpoch;
-    _recordingPath = '${directory.path}/lecture_$timestamp.m4a';
-
-    await _recorder.start(
-      const RecordConfig(encoder: AudioEncoder.aacLc),
-      path: _recordingPath!,
-    );
-
-    setState(() {
-      _isRecording = true;
-      _isPaused = false;
-      _duration = Duration.zero;
-    });
-
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!_isPaused) {
-        setState(() {
-          _duration += const Duration(seconds: 1);
-        });
-      }
-    });
+    await recordingService.startRecording();
   }
 
   Future<void> _pauseRecording() async {
-    await _recorder.pause();
-    setState(() {
-      _isPaused = true;
-    });
+    await recordingService.pauseRecording();
   }
 
   Future<void> _resumeRecording() async {
-    await _recorder.resume();
-    setState(() {
-      _isPaused = false;
-    });
+    await recordingService.resumeRecording();
   }
 
   Future<void> _stopRecording() async {
-    _timer?.cancel();
-    final path = await _recorder.stop();
-    
-    setState(() {
-      _isRecording = false;
-      _isPaused = false;
-      _recordingPath = path;
-    });
-
-    if (path != null) {
-      _showUploadDialog();
+    final path = await recordingService.stopRecording();
+    if (path != null && mounted) {
+      _showUploadDialog(path);
     }
   }
 
-  void _showUploadDialog() {
+  void _showUploadDialog(String path) {
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -142,15 +108,14 @@ class _RecordingScreenState extends State<RecordingScreen> {
           TextButton(
             onPressed: () {
               Navigator.of(context).pop();
-              _deleteRecording();
+              _deleteFile(path);
             },
             child: const Text('Удалить'),
           ),
           TextButton.icon(
             onPressed: () async {
-              if (_recordingPath == null) return;
-              final f = File(_recordingPath!);
-              if (f.existsSync()) await Share.shareXFiles([XFile(_recordingPath!)], text: _titleController.text.isEmpty ? null : _titleController.text);
+              final f = File(path);
+              if (f.existsSync()) await Share.shareXFiles([XFile(path)], text: _titleController.text.isEmpty ? null : _titleController.text);
             },
             icon: const Icon(Icons.save_alt, size: 18),
             label: const Text('Сохранить копию'),
@@ -158,7 +123,7 @@ class _RecordingScreenState extends State<RecordingScreen> {
           FilledButton(
             onPressed: () {
               Navigator.of(context).pop();
-              _enqueueAndGoToLectures();
+              _enqueueAndGoToLectures(path);
             },
             child: const Text('Загрузить на сервер'),
           ),
@@ -167,29 +132,20 @@ class _RecordingScreenState extends State<RecordingScreen> {
     );
   }
 
-  void _deleteRecording() {
-    if (_recordingPath != null) {
-      final file = File(_recordingPath!);
-      if (file.existsSync()) {
-        file.deleteSync();
-      }
+  void _deleteFile(String path) {
+    final file = File(path);
+    if (file.existsSync()) {
+      file.deleteSync();
     }
-    setState(() {
-      _recordingPath = null;
-      _duration = Duration.zero;
-    });
+    if (mounted) setState(() {});
   }
 
-  /// Сохраняет запись в локальный список (файл не удаляется при ошибке загрузки),
-  /// добавляет в очередь загрузки и переходит к списку лекций.
-  void _enqueueAndGoToLectures() {
-    if (_recordingPath == null) return;
-
+  void _enqueueAndGoToLectures(String path) {
     final title = _titleController.text.trim();
     final language = _selectedLanguage == 'auto' ? null : _selectedLanguage;
 
     final local = LocalRecording(
-      path: _recordingPath!,
+      path: path,
       title: title.isEmpty ? '' : title,
       language: language,
       createdAtMillis: DateTime.now().millisecondsSinceEpoch,
@@ -197,21 +153,18 @@ class _RecordingScreenState extends State<RecordingScreen> {
     localRecordingsRepository.add(local);
 
     uploadQueue.addTask(
-      filePath: _recordingPath!,
+      filePath: path,
       title: title.isEmpty ? null : title,
       language: language,
     );
 
-    _recordingPath = null;
-    _duration = Duration.zero;
     _titleController.clear();
     _selectedLanguage = 'auto';
-    setState(() {});
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Запись сохранена локально и добавлена в очередь загрузки. При ошибке можно повторить из «Локальные записи».'),
+          content: Text('Запись сохранена локально и добавлена в очередь загрузки.'),
         ),
       );
       Navigator.of(context).pushReplacementNamed(AppRoutes.lectures);
@@ -232,6 +185,9 @@ class _RecordingScreenState extends State<RecordingScreen> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isRecording = recordingService.isRecording;
+    final isPaused = recordingService.isPaused;
+    final duration = recordingService.duration;
 
     return Scaffold(
       appBar: AppBar(
@@ -241,74 +197,74 @@ class _RecordingScreenState extends State<RecordingScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-                  // Timer display
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 32,
-                      vertical: 16,
-                    ),
-                    decoration: BoxDecoration(
-                      color: colorScheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Text(
-                      _formatDuration(_duration),
-                      style: Theme.of(context).textTheme.displayMedium?.copyWith(
-                        fontFeatures: [const FontFeature.tabularFigures()],
-                      ),
-                    ),
+            // Timer display
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 32,
+                vertical: 16,
+              ),
+              decoration: BoxDecoration(
+                color: colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Text(
+                _formatDuration(duration),
+                style: Theme.of(context).textTheme.displayMedium?.copyWith(
+                  fontFeatures: [const FontFeature.tabularFigures()],
+                ),
+              ),
+            ),
+            const SizedBox(height: 48),
+            
+            // Recording indicator
+            if (isRecording)
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
+                width: 16,
+                height: 16,
+                decoration: BoxDecoration(
+                  color: isPaused ? Colors.orange : Colors.red,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            const SizedBox(height: 48),
+            
+            // Control buttons
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (isRecording) ...[
+                  // Pause/Resume button
+                  FloatingActionButton(
+                    heroTag: 'pause',
+                    onPressed: isPaused ? _resumeRecording : _pauseRecording,
+                    child: Icon(isPaused ? Icons.play_arrow : Icons.pause),
                   ),
-                  const SizedBox(height: 48),
-                  
-                  // Recording indicator
-                  if (_isRecording)
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 300),
-                      width: 16,
-                      height: 16,
-                      decoration: BoxDecoration(
-                        color: _isPaused ? Colors.orange : Colors.red,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                  const SizedBox(height: 48),
-                  
-                  // Control buttons
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      if (_isRecording) ...[
-                        // Pause/Resume button
-                        FloatingActionButton(
-                          heroTag: 'pause',
-                          onPressed: _isPaused ? _resumeRecording : _pauseRecording,
-                          child: Icon(_isPaused ? Icons.play_arrow : Icons.pause),
-                        ),
-                        const SizedBox(width: 32),
-                      ],
-                      
-                      // Main record/stop button
-                      FloatingActionButton.large(
-                        heroTag: 'record',
-                        onPressed: _isRecording ? _stopRecording : _startRecording,
-                        backgroundColor: _isRecording ? Colors.red : colorScheme.primary,
-                        child: Icon(
-                          _isRecording ? Icons.stop : Icons.mic,
-                          size: 36,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 32),
-                  
-                  // Status text
-                  Text(
-                    _isRecording
-                        ? (_isPaused ? 'Пауза' : 'Идёт запись...')
-                        : 'Нажмите для начала записи',
-                    style: Theme.of(context).textTheme.bodyLarge,
-                  ),
+                  const SizedBox(width: 32),
                 ],
+                
+                // Main record/stop button
+                FloatingActionButton.large(
+                  heroTag: 'record',
+                  onPressed: isRecording ? _stopRecording : _startRecording,
+                  backgroundColor: isRecording ? Colors.red : colorScheme.primary,
+                  child: Icon(
+                    isRecording ? Icons.stop : Icons.mic,
+                    size: 36,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 32),
+            
+            // Status text
+            Text(
+              isRecording
+                  ? (isPaused ? 'Пауза' : 'Идёт запись...')
+                  : 'Нажмите для начала записи',
+              style: Theme.of(context).textTheme.bodyLarge,
+            ),
+          ],
         ),
       ),
     );

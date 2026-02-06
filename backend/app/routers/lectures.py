@@ -1,5 +1,6 @@
 """Lectures API router."""
 import asyncio
+import logging
 import uuid
 import aiofiles
 import shutil
@@ -36,6 +37,7 @@ from ..services.storage_service import storage_service
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _get_audio_duration_sec(audio_path: str) -> Optional[float]:
@@ -253,6 +255,7 @@ async def process_lecture_transcription(
     from ..database import AsyncSessionLocal
     from ..services.vector_store import vector_store
 
+    logger.info("Starting transcription: lecture_id=%s path=%s", lecture_id, audio_path)
     total_duration = _get_audio_duration_sec(audio_path)
     loop = asyncio.get_event_loop()
 
@@ -279,6 +282,7 @@ async def process_lecture_transcription(
             progress_callback=on_progress if total_duration else None,
         )
     except Exception as e:
+        logger.exception("Lecture transcription failed: lecture_id=%s path=%s", lecture_id, audio_path)
         async with AsyncSessionLocal() as db:
             await storage_service.update_lecture_status(lecture_id, "failed", db)
             await storage_service.update_lecture_metadata(lecture_id, {"error": str(e)}, db)
@@ -496,6 +500,31 @@ async def get_lecture_audio(
         media_type=media_type,
         filename=lecture.get("filename") or path_obj.name if download else None,
     )
+
+
+@router.post("/{lecture_id}/extract-tasks")
+async def extract_tasks_from_lecture(
+    lecture_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Extract tasks and deadlines from lecture transcript using AI."""
+    lecture = await db.get(Lecture, lecture_id)
+    if not lecture or lecture.user_id != current_user.id:
+        raise HTTPException(404, "Lecture not found")
+    
+    # Get transcript
+    transcript_path = settings.data_dir / "transcripts" / f"{lecture_id}.txt"
+    if not transcript_path.exists():
+        raise HTTPException(404, "Transcript not found. Please wait for transcription to complete.")
+    
+    transcript_text = transcript_path.read_text(encoding="utf-8")
+    
+    # Extract tasks
+    from ..services.task_extractor import task_extractor
+    tasks = await task_extractor.extract_tasks(transcript_text, lecture.created_at)
+    
+    return {"tasks": tasks, "lecture_id": lecture_id}
 
 
 @router.delete("/{lecture_id}")
