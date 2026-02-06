@@ -69,7 +69,7 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
 
   Future<void> _loadLectures() async {
     try {
-      final res = await apiClient.getLectures(limit: 100); // Simple list for dropdown
+      final res = await apiClient.getLectures(); // Simple list for dropdown
       if (mounted) {
         setState(() {
           _lectures = res.lectures;

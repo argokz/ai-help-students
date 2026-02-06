@@ -96,6 +96,9 @@ async def init_db() -> None:
         # Миграции: добавить колонки, если их ещё нет
         async with engine.begin() as conn:
             await conn.execute(text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true"
+            ))
+            await conn.execute(text(
                 "ALTER TABLE lectures ADD COLUMN IF NOT EXISTS processing_progress REAL"
             ))
             await conn.execute(text(

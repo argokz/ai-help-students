@@ -25,6 +25,7 @@ class LectureDetailScreen extends StatefulWidget {
 
 class _LectureDetailScreenState extends State<LectureDetailScreen> {
   Lecture? _lecture;
+  bool _isLoading = true;
   bool _isLoadingAudio = false;
   String? _error;
 
