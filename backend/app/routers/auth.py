@@ -156,7 +156,7 @@ async def link_google_calendar(
             data={
                 "code": code,
                 "client_id": settings.google_client_id,
-                "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
+                "client_secret": settings.google_client_secret,
                 "grant_type": "authorization_code",
                 "redirect_uri": "", # Should be empty for serverAuthCode from mobile
             }

@@ -61,7 +61,9 @@ class Settings(BaseSettings):
     jwt_expire_minutes: int = 60 * 24 * 7  # 7 days
     
     # Google OAuth (Web Client ID для проверки токена; Android Client ID опционально)
+    # GOOGLE_CLIENT_SECRET нужен для обмена auth code на refresh token (календарь) и для Google Calendar API
     google_client_id: str = ""
+    google_client_secret: str = ""
     google_android_client_id: str = ""
     
     # Logging: DEBUG, INFO, WARNING, ERROR, CRITICAL

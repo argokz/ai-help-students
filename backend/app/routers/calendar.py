@@ -11,7 +11,7 @@ from ..db_models import User, CalendarEvent
 from ..dependencies import get_current_user
 from ..models.calendar import CalendarEventCreate, CalendarEventUpdate, CalendarResponse
 
-router = APIRouter(prefix="/calendar", tags=["calendar"])
+router = APIRouter()
 
 @router.get("", response_model=List[CalendarResponse])
 async def get_events(

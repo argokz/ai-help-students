@@ -1,4 +1,3 @@
-import os
 from datetime import datetime
 from typing import List, Optional
 
@@ -17,7 +16,7 @@ class GoogleCalendarService:
             refresh_token=refresh_token,
             token_uri="https://oauth2.googleapis.com/token",
             client_id=settings.google_client_id,
-            client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
+            client_secret=settings.google_client_secret,
             scopes=["https://www.googleapis.com/auth/calendar.events"]
         )
         self.service = build("calendar", "v3", credentials=self.credentials)

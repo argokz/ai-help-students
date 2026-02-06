@@ -18,7 +18,7 @@ from ..dependencies import get_current_user
 from ..models.notes import NoteCreate, NoteUpdate, NoteResponse
 from ..services.asr_service import asr_service
 
-router = APIRouter(prefix="/notes", tags=["notes"])
+router = APIRouter()
 
 # Ensure notes directories exist
 NOTES_DIR = settings.data_dir / "notes"

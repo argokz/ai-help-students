@@ -11,7 +11,7 @@ from ..db_models import User, Task
 from ..dependencies import get_current_user
 from ..models.tasks import TaskCreate, TaskUpdate, TaskResponse
 
-router = APIRouter(prefix="/tasks", tags=["tasks"])
+router = APIRouter()
 
 @router.get("", response_model=List[TaskResponse])
 async def get_tasks(
