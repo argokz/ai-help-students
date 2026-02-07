@@ -23,19 +23,27 @@ class RemoteASRClient:
         self.timeout = aiohttp.ClientTimeout(total=3600)  # 1 hour timeout for long files
     
     async def check_health(self) -> bool:
-        """Check if worker is available."""
+        """Check if worker is available and responding."""
         try:
             async with aiohttp.ClientSession() as session:
+                # Проверяем что worker отвечает на запросы
                 async with session.get(
-                    f"{self.worker_url}/health",
+                    f"{self.worker_url}/",
                     timeout=aiohttp.ClientTimeout(total=5)
                 ) as resp:
                     if resp.status == 200:
-                        data = await resp.json()
-                        return data.get("status") == "healthy"
-                    return False
+                        logger.info(f"Worker is available at {self.worker_url}")
+                        # Worker доступен - этого достаточно
+                        # Модель загрузится при первом запросе транскрибации
+                        return True
+                    else:
+                        logger.warning(f"Worker returned status {resp.status}")
+                        return False
+        except aiohttp.ClientError as e:
+            logger.warning(f"Worker connection failed: {e}")
+            return False
         except Exception as e:
-            logger.debug(f"Worker health check failed: {e}")
+            logger.warning(f"Worker health check failed: {e}")
             return False
     
     async def transcribe(
@@ -126,9 +134,11 @@ def get_remote_client() -> Optional[RemoteASRClient]:
     global remote_asr_client
     
     if not settings.whisper_worker_url:
+        logger.debug("WHISPER_WORKER_URL not configured, remote client not available")
         return None
     
     if remote_asr_client is None:
+        logger.info(f"Initializing remote ASR client for {settings.whisper_worker_url}")
         remote_asr_client = RemoteASRClient(settings.whisper_worker_url)
     
     return remote_asr_client
