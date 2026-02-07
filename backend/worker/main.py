@@ -30,9 +30,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Глобальная переменная для модели
+# Глобальные переменные для модели
 _whisper_model = None
 _model_lock = None
+_whisper_device = "cpu"  # фактическое устройство после загрузки (cuda/cpu)
 
 
 class TranscriptionRequest(BaseModel):
@@ -53,7 +54,7 @@ class TranscriptionResponse(BaseModel):
 
 def load_whisper_model():
     """Lazy load Whisper model."""
-    global _whisper_model, _model_lock
+    global _whisper_model, _model_lock, _whisper_device
     if _whisper_model is None:
         import asyncio
         from faster_whisper import WhisperModel
@@ -71,6 +72,7 @@ def load_whisper_model():
                     device="cuda",
                     compute_type=compute_type,
                 )
+                _whisper_device = "cuda"
                 logger.info("Whisper model loaded successfully on CUDA")
             except Exception as e:
                 logger.warning(f"Failed to load on CUDA: {e}, falling back to CPU")
@@ -84,6 +86,7 @@ def load_whisper_model():
                 device="cpu",
                 compute_type="int8",
             )
+            _whisper_device = "cpu"
             logger.info("Whisper model loaded successfully on CPU")
         
         _model_lock = asyncio.Lock()
@@ -107,13 +110,10 @@ async def health():
     """Detailed health check."""
     try:
         model, _ = load_whisper_model()
-        device = os.getenv("WHISPER_DEVICE", "cuda")
-        # Определяем реальное устройство
-        actual_device = "cuda" if hasattr(model, "_model") and hasattr(model._model, "device") else "cpu"
         return {
             "status": "healthy",
             "model": "large-v3",
-            "device": actual_device,
+            "device": _whisper_device,
             "model_loaded": model is not None
         }
     except Exception as e:
