@@ -3,7 +3,7 @@ import asyncio
 import logging
 from typing import Callable, Optional
 from ..config import settings
-
+from .remote_asr_client import get_remote_client
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,8 @@ class ASRService:
         """
         Transcribe audio file to text with timestamps.
         
+        Tries to use remote worker (GPU) if available, falls back to local processing.
+        
         Args:
             audio_path: Path to the audio file
             language: Optional language code (ru, kz, en) or None for auto-detect
@@ -53,6 +55,32 @@ class ASRService:
         Returns:
             dict with segments, language, duration
         """
+        # Try remote worker first if enabled
+        if settings.whisper_use_remote:
+            remote_client = get_remote_client()
+            if remote_client:
+                try:
+                    # Check if worker is available
+                    is_healthy = await remote_client.check_health()
+                    if is_healthy:
+                        logger.info(f"Using remote worker for transcription: {audio_path}")
+                        result = await remote_client.transcribe(audio_path, language)
+                        
+                        # Simulate progress if callback provided (remote doesn't support real-time progress)
+                        if progress_callback and total_duration:
+                            try:
+                                progress_callback(1.0)  # Mark as complete
+                            except Exception:
+                                pass
+                        
+                        return result
+                    else:
+                        logger.warning("Remote worker is not healthy, falling back to local")
+                except Exception as e:
+                    logger.warning(f"Remote worker failed: {e}, falling back to local")
+        
+        # Fallback to local transcription
+        logger.info(f"Using local transcription: {audio_path}")
         async with self._model_lock:
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(

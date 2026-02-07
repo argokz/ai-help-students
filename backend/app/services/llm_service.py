@@ -1,6 +1,7 @@
 """LLM service for RAG and summary generation with support for multiple providers."""
 import json
 import asyncio
+import logging
 from typing import Optional
 from abc import ABC, abstractmethod
 
@@ -41,14 +42,32 @@ SUMMARY_SYSTEM_PROMPT = """Ты — ассистент для создания �
     "key_definitions": [{"term": "термин", "definition": "определение"}, ...],
     "important_facts": ["факт 1", "факт 2", ...],
     "assignments": ["задание 1", ...],
-    "brief_summary": "Краткое резюме лекции в 2-3 предложениях"
+    "brief_summary": "Краткое резюме лекции в 2-3 предложениях",
+    "detailed_summary": "Детальный конспект с основными идеями и выводами"
 }
 
 Правила:
 1. Используй ТОЛЬКО информацию из текста лекции
 2. Пиши на том же языке, что и лекция
 3. Если какой-то раздел пустой (например, нет заданий), оставь пустой массив []
-4. Возвращай ТОЛЬКО валидный JSON, без markdown-разметки"""
+4. Возвращай ТОЛЬКО валидный JSON, без markdown-разметки
+5. В detailed_summary включи все важные детали, ничего не теряй"""
+
+SUMMARY_CHUNK_PROMPT = """Ты анализируешь часть большой лекции. Извлеки из этого фрагмента:
+- Основные темы
+- Ключевые определения
+- Важные факты
+- Задания (если есть)
+
+Верни результат в формате JSON:
+{
+    "main_topics": ["тема 1", ...],
+    "key_definitions": [{"term": "...", "definition": "..."}, ...],
+    "important_facts": ["факт 1", ...],
+    "assignments": ["задание 1", ...]
+}
+
+Используй ТОЛЬКО информацию из предоставленного текста. Возвращай ТОЛЬКО валидный JSON."""
 
 
 class BaseLLMProvider(ABC):
@@ -291,11 +310,26 @@ class LLMService:
         Returns:
             Dict with summary structure
         """
-        # Truncate very long texts to fit context window
-        max_chars = 30000  # Gemini has larger context
-        if len(text) > max_chars:
-            text = text[:max_chars] + "... [текст сокращён]"
+        from ..services.chunker_service import chunker_service
+        import logging
         
+        # For large texts, use chunking strategy
+        max_chars_per_chunk = 25000  # Safe limit for Gemini
+        text_length = len(text)
+        
+        if text_length <= max_chars_per_chunk:
+            # Small lecture - process directly
+            return await self._generate_summary_single(text, language)
+        else:
+            # Large lecture - use chunking
+            return await self._generate_summary_chunked(text, language, max_chars_per_chunk, chunker_service)
+    
+    async def _generate_summary_single(
+        self,
+        text: str,
+        language: Optional[str] = None,
+    ) -> dict:
+        """Generate summary for a single chunk."""
         user_message = f"Создай конспект следующей лекции:\n\n{text}"
         
         try:
@@ -303,22 +337,11 @@ class LLMService:
                 system_prompt=SUMMARY_SYSTEM_PROMPT,
                 user_message=user_message,
                 temperature=0.2,
-                max_tokens=2000,
+                max_tokens=3000,
                 json_mode=True,
             )
             
-            # Parse JSON response
-            # Clean up potential markdown formatting
-            content = content.strip()
-            if content.startswith("```json"):
-                content = content[7:]
-            if content.startswith("```"):
-                content = content[3:]
-            if content.endswith("```"):
-                content = content[:-3]
-            content = content.strip()
-            
-            summary = json.loads(content)
+            summary = self._parse_json_response(content)
             
             # Ensure all required fields exist
             summary.setdefault("main_topics", [])
@@ -326,28 +349,147 @@ class LLMService:
             summary.setdefault("important_facts", [])
             summary.setdefault("assignments", [])
             summary.setdefault("brief_summary", "")
+            summary.setdefault("detailed_summary", "")
             summary["language"] = language
             
             return summary
             
-        except json.JSONDecodeError as e:
-            return {
-                "main_topics": ["Ошибка парсинга конспекта"],
-                "key_definitions": [],
-                "important_facts": [],
-                "assignments": [],
-                "brief_summary": f"Не удалось создать структурированный конспект: {str(e)}",
-                "language": language,
-            }
         except Exception as e:
-            return {
-                "main_topics": ["Ошибка генерации"],
-                "key_definitions": [],
-                "important_facts": [],
-                "assignments": [],
-                "brief_summary": f"Ошибка при генерации конспекта: {str(e)}",
-                "language": language,
-            }
+            return self._create_error_summary(f"Ошибка при генерации конспекта: {str(e)}", language)
+    
+    async def _generate_summary_chunked(
+        self,
+        text: str,
+        language: Optional[str] = None,
+        chunk_size: int = 25000,
+        chunker_service = None,
+    ) -> dict:
+        """Generate summary for large lecture using chunking."""
+        import logging
+        
+        # Split text into chunks
+        chunks = chunker_service.chunk_text(text, preserve_sentences=True)
+        
+        # Adjust chunk size to fit within limits
+        adjusted_chunks = []
+        for chunk in chunks:
+            if len(chunk) > chunk_size:
+                # Further split if needed
+                for i in range(0, len(chunk), chunk_size):
+                    adjusted_chunks.append(chunk[i:i+chunk_size])
+            else:
+                adjusted_chunks.append(chunk)
+        
+        # Process each chunk
+        chunk_summaries = []
+        for i, chunk in enumerate(adjusted_chunks):
+            try:
+                user_message = f"Проанализируй эту часть лекции (часть {i+1} из {len(adjusted_chunks)}):\n\n{chunk}"
+                content = await self.provider.generate(
+                    system_prompt=SUMMARY_CHUNK_PROMPT,
+                    user_message=user_message,
+                    temperature=0.2,
+                    max_tokens=2000,
+                    json_mode=True,
+                )
+                chunk_data = self._parse_json_response(content)
+                chunk_summaries.append(chunk_data)
+            except Exception as e:
+                logging.warning(f"Error processing chunk {i+1}: {e}")
+                continue
+        
+        # Merge chunk summaries
+        merged = {
+            "main_topics": [],
+            "key_definitions": [],
+            "important_facts": [],
+            "assignments": [],
+            "brief_summary": "",
+            "detailed_summary": "",
+        }
+        
+        seen_topics = set()
+        seen_definitions = {}
+        
+        for chunk_summary in chunk_summaries:
+            # Merge topics (deduplicate)
+            for topic in chunk_summary.get("main_topics", []):
+                if topic not in seen_topics:
+                    merged["main_topics"].append(topic)
+                    seen_topics.add(topic)
+            
+            # Merge definitions (deduplicate by term)
+            for def_item in chunk_summary.get("key_definitions", []):
+                term = def_item.get("term", "")
+                if term and term not in seen_definitions:
+                    merged["key_definitions"].append(def_item)
+                    seen_definitions[term] = def_item
+            
+            # Merge facts
+            merged["important_facts"].extend(chunk_summary.get("important_facts", []))
+            
+            # Merge assignments
+            merged["assignments"].extend(chunk_summary.get("assignments", []))
+        
+        # Generate final brief and detailed summaries
+        try:
+            # Create summary of all chunks for final summary
+            chunks_text = "\n\n".join([f"Часть {i+1}:\n{chunk}" for i, chunk in enumerate(adjusted_chunks[:5])])  # Use first 5 chunks
+            final_prompt = f"""На основе анализа всех частей лекции создай:
+1. Краткое резюме (2-3 предложения) - brief_summary
+2. Детальный конспект с основными идеями и выводами - detailed_summary
+
+Содержание лекции:
+{chunks_text[:40000]}
+
+Верни JSON:
+{{
+    "brief_summary": "...",
+    "detailed_summary": "..."
+}}"""
+            
+            final_content = await self.provider.generate(
+                system_prompt="Ты создаёшь финальные резюме лекции. Верни ТОЛЬКО валидный JSON.",
+                user_message=final_prompt,
+                temperature=0.2,
+                max_tokens=2000,
+                json_mode=True,
+            )
+            final_data = self._parse_json_response(final_content)
+            merged["brief_summary"] = final_data.get("brief_summary", "")
+            merged["detailed_summary"] = final_data.get("detailed_summary", "")
+        except Exception as e:
+            logging.warning(f"Error generating final summaries: {e}")
+            merged["brief_summary"] = f"Конспект создан из {len(chunk_summaries)} частей лекции"
+            merged["detailed_summary"] = "Детальный конспект объединён из всех частей лекции"
+        
+        merged["language"] = language
+        return merged
+    
+    def _parse_json_response(self, content: str) -> dict:
+        """Parse JSON response, handling markdown formatting."""
+        import json
+        content = content.strip()
+        if content.startswith("```json"):
+            content = content[7:]
+        if content.startswith("```"):
+            content = content[3:]
+        if content.endswith("```"):
+            content = content[:-3]
+        content = content.strip()
+        return json.loads(content)
+    
+    def _create_error_summary(self, error_msg: str, language: Optional[str] = None) -> dict:
+        """Create error summary structure."""
+        return {
+            "main_topics": [],
+            "key_definitions": [],
+            "important_facts": [],
+            "assignments": [],
+            "brief_summary": error_msg,
+            "detailed_summary": "",
+            "language": language,
+        }
 
 
 # Global instance

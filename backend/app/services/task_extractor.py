@@ -99,12 +99,73 @@ class TaskExtractor:
         current_date_str = reference_date.strftime("%d.%m.%Y (%A)")
         
         try:
-            prompt = self.EXTRACTION_PROMPT.format(
-                current_date=current_date_str,
-                transcript=transcript[:4000]  # Limit to avoid token limits
-            )
+            # Use chunking for long transcripts
+            max_chunk_size = 15000  # Increased from 4000
+            if len(transcript) > max_chunk_size:
+                # Process in chunks and merge results
+                from ..services.chunker_service import chunker_service
+                chunks = chunker_service.chunk_text(transcript, preserve_sentences=True)
+                all_tasks = []
+                
+                for i, chunk in enumerate(chunks):
+                    if len(chunk) > max_chunk_size:
+                        # Further split if needed
+                        for j in range(0, len(chunk), max_chunk_size):
+                            sub_chunk = chunk[j:j+max_chunk_size]
+                            chunk_tasks = await self._extract_from_chunk(
+                                sub_chunk, reference_date, current_date_str, f"{i+1}.{j//max_chunk_size+1}"
+                            )
+                            all_tasks.extend(chunk_tasks)
+                    else:
+                        chunk_tasks = await self._extract_from_chunk(
+                            chunk, reference_date, current_date_str, str(i+1)
+                        )
+                        all_tasks.extend(chunk_tasks)
+                
+                # Deduplicate tasks
+                seen_titles = set()
+                unique_tasks = []
+                for task in all_tasks:
+                    title = task.get('title', '')
+                    if title and title not in seen_titles:
+                        seen_titles.add(title)
+                        unique_tasks.append(task)
+                
+                processed_tasks = self._post_process_tasks(unique_tasks, reference_date)
+                logger.info(f"Extracted {len(processed_tasks)} tasks from {len(chunks)} chunks")
+                return processed_tasks
+            else:
+                # Single chunk processing
+                tasks = await self._extract_from_chunk(transcript, reference_date, current_date_str, "1")
+                processed_tasks = self._post_process_tasks(tasks, reference_date)
+                logger.info(f"Extracted {len(processed_tasks)} tasks from transcript")
+                return processed_tasks
             
-            response = await llm_service.generate(prompt)
+        except Exception as e:
+            logger.error(f"Error extracting tasks: {e}")
+            return []
+    
+    async def _extract_from_chunk(
+        self,
+        chunk_text: str,
+        reference_date: datetime,
+        current_date_str: str,
+        chunk_id: str,
+    ) -> List[Dict]:
+        """Extract tasks from a single chunk."""
+        prompt = self.EXTRACTION_PROMPT.format(
+            current_date=current_date_str,
+            transcript=chunk_text
+        )
+        
+        try:
+            response = await llm_service.provider.generate(
+                system_prompt="Ты анализируешь транскрипцию лекции и извлекаешь задания. Верни ТОЛЬКО валидный JSON.",
+                user_message=prompt,
+                temperature=0.2,
+                max_tokens=2000,
+                json_mode=True,
+            )
             
             # Clean response - remove markdown if present
             response_text = response.strip()
@@ -117,26 +178,27 @@ class TaskExtractor:
             import json
             result = json.loads(response_text)
             tasks = result.get('tasks', [])
-            
-            # Post-process tasks
-            processed_tasks = []
-            for task in tasks:
-                # Try to parse deadline if LLM didn't provide exact date
-                if not task.get('deadline_date') and task.get('deadline_text'):
-                    parsed_date = self._parse_relative_date(task['deadline_text'], reference_date)
-                    if parsed_date:
-                        task['deadline_date'] = parsed_date.strftime('%Y-%m-%d')
-                
-                # Only include tasks with reasonable confidence
-                if task.get('confidence', 0) >= 0.5:
-                    processed_tasks.append(task)
-            
-            logger.info(f"Extracted {len(processed_tasks)} tasks from transcript")
-            return processed_tasks
+            return tasks
             
         except Exception as e:
-            logger.error(f"Error extracting tasks: {e}")
+            logger.warning(f"Error extracting tasks from chunk {chunk_id}: {e}")
             return []
+    
+    def _post_process_tasks(self, tasks: List[Dict], reference_date: datetime) -> List[Dict]:
+        """Post-process extracted tasks."""
+        processed_tasks = []
+        for task in tasks:
+            # Try to parse deadline if LLM didn't provide exact date
+            if not task.get('deadline_date') and task.get('deadline_text'):
+                parsed_date = self._parse_relative_date(task['deadline_text'], reference_date)
+                if parsed_date:
+                    task['deadline_date'] = parsed_date.strftime('%Y-%m-%d')
+            
+            # Only include tasks with reasonable confidence
+            if task.get('confidence', 0) >= 0.5:
+                processed_tasks.append(task)
+        
+        return processed_tasks
 
 
 task_extractor = TaskExtractor()

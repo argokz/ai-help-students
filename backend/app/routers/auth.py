@@ -1,5 +1,6 @@
 """Auth API: register, login, Google, me."""
 import secrets
+import aiohttp
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -143,8 +144,6 @@ async def link_google_calendar(
     db: AsyncSession = Depends(get_db),
 ):
     """Link Google Calendar by exchanging auth code for refresh token."""
-    import aiohttp
-    
     code = data.get("code")
     if not code:
         raise HTTPException(400, "Auth code is required")

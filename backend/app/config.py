@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     whisper_beam_size: int = 5  # 1 — быстрее, 5 — качество по умолчанию
     whisper_condition_on_previous_text: bool = False  # False — быстрее, меньше петлей
     
+    # Remote Worker settings (для использования GPU на удалённом ПК через Tailscale)
+    whisper_worker_url: str = ""  # Например: http://100.115.128.128:8004
+    whisper_use_remote: bool = True  # Использовать remote worker если доступен, иначе fallback на локальный
+    
     # Embedding settings
     embedding_model: str = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
     

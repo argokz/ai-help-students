@@ -20,4 +20,5 @@ class SummaryResponse(BaseModel):
         description="Mentioned assignments or action items"
     )
     brief_summary: str = Field(..., description="Brief 2-3 sentence summary")
+    detailed_summary: str = Field(default="", description="Detailed summary with main ideas and conclusions")
     language: Optional[str] = Field(None, description="Language of the summary")

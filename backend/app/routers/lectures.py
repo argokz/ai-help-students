@@ -14,7 +14,7 @@ from pydantic import BaseModel as PydanticBaseModel
 
 from ..config import settings
 from ..database import AsyncSessionLocal, get_db
-from ..db_models import User
+from ..db_models import User, Lecture
 from ..dependencies import get_current_user
 from ..models import (
     LectureListResponse,
@@ -513,16 +513,19 @@ async def extract_tasks_from_lecture(
     if not lecture or lecture.user_id != current_user.id:
         raise HTTPException(404, "Lecture not found")
     
-    # Get transcript
-    transcript_path = settings.data_dir / "transcripts" / f"{lecture_id}.txt"
-    if not transcript_path.exists():
+    # Get transcript from storage service
+    transcript = await storage_service.get_transcript(lecture_id)
+    if not transcript:
         raise HTTPException(404, "Transcript not found. Please wait for transcription to complete.")
     
-    transcript_text = transcript_path.read_text(encoding="utf-8")
+    # Extract full text from transcript segments
+    full_text = " ".join(seg.get("text", "") for seg in transcript.get("segments", []))
+    if not full_text.strip():
+        raise HTTPException(400, "Transcript is empty")
     
     # Extract tasks
     from ..services.task_extractor import task_extractor
-    tasks = await task_extractor.extract_tasks(transcript_text, lecture.created_at)
+    tasks = await task_extractor.extract_tasks(full_text, lecture.created_at)
     
     return {"tasks": tasks, "lecture_id": lecture_id}
 
