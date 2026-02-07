@@ -1,7 +1,7 @@
 """Whisper Worker Service for remote GPU transcription.
 
 Запуск на удалённом ПК с GPU через Tailscale.
-Использует Whisper large-v3 для транскрибации.
+По умолчанию модель medium (оптимально для GTX 1660 Ti 6GB, 32GB RAM).
 """
 import os
 import logging
@@ -34,6 +34,7 @@ app.add_middleware(
 _whisper_model = None
 _model_lock = None
 _whisper_device = "cpu"  # фактическое устройство после загрузки (cuda/cpu)
+_whisper_model_name = "medium"  # large-v3 тяжёлый для 6GB; medium оптимален для GTX 1660 Ti
 
 
 class TranscriptionRequest(BaseModel):
@@ -53,41 +54,41 @@ class TranscriptionResponse(BaseModel):
 
 
 def load_whisper_model():
-    """Lazy load Whisper model."""
-    global _whisper_model, _model_lock, _whisper_device
+    """Lazy load Whisper model. По умолчанию medium — оптимально для GTX 1660 Ti (6GB) и 32GB RAM."""
+    global _whisper_model, _model_lock, _whisper_device, _whisper_model_name
     if _whisper_model is None:
         import asyncio
         from faster_whisper import WhisperModel
         
-        # Определяем устройство из переменной окружения или пробуем CUDA
+        model_name = os.getenv("WHISPER_MODEL", "medium")
+        _whisper_model_name = model_name
         device = os.getenv("WHISPER_DEVICE", "cuda")
         compute_type = os.getenv("WHISPER_COMPUTE_TYPE", "float16")
         
-        # Пробуем загрузить на CUDA, если не получится - fallback на CPU
         if device == "cuda":
             try:
-                logger.info("Loading Whisper large-v3 model on CUDA...")
+                logger.info("Loading Whisper %s on CUDA (compute_type=%s)...", model_name, compute_type)
                 _whisper_model = WhisperModel(
-                    "large-v3",
+                    model_name,
                     device="cuda",
                     compute_type=compute_type,
                 )
                 _whisper_device = "cuda"
-                logger.info("Whisper model loaded successfully on CUDA")
+                logger.info("Whisper model %s loaded on CUDA", model_name)
             except Exception as e:
-                logger.warning(f"Failed to load on CUDA: {e}, falling back to CPU")
+                logger.warning("Failed to load on CUDA: %s, falling back to CPU", e)
                 device = "cpu"
                 compute_type = "int8"
         
         if device == "cpu" or _whisper_model is None:
-            logger.info("Loading Whisper large-v3 model on CPU...")
+            logger.info("Loading Whisper %s on CPU...", model_name)
             _whisper_model = WhisperModel(
-                "large-v3",
+                model_name,
                 device="cpu",
                 compute_type="int8",
             )
             _whisper_device = "cpu"
-            logger.info("Whisper model loaded successfully on CPU")
+            logger.info("Whisper model %s loaded on CPU", model_name)
         
         _model_lock = asyncio.Lock()
     return _whisper_model, _model_lock
@@ -96,12 +97,12 @@ def load_whisper_model():
 @app.get("/")
 async def root():
     """Health check."""
-    device = os.getenv("WHISPER_DEVICE", "cuda")
+    model_name = _whisper_model_name if _whisper_model is not None else os.getenv("WHISPER_MODEL", "medium")
     return {
         "status": "ok",
         "service": "whisper-worker",
-        "model": "large-v3",
-        "device": device
+        "model": model_name,
+        "device": os.getenv("WHISPER_DEVICE", "cuda"),
     }
 
 
@@ -112,9 +113,9 @@ async def health():
         model, _ = load_whisper_model()
         return {
             "status": "healthy",
-            "model": "large-v3",
+            "model": _whisper_model_name,
             "device": _whisper_device,
-            "model_loaded": model is not None
+            "model_loaded": model is not None,
         }
     except Exception as e:
         return {
@@ -211,14 +212,19 @@ def _transcribe_sync(audio_path: str, language: Optional[str], model) -> dict:
     }
     whisper_lang = lang_map.get(language, language) if language else None
     
+    # beam_size=1 и condition_on_previous_text=False сильно ускоряют (10 мин аудио — в разы быстрее)
+    beam_size = int(os.getenv("WHISPER_BEAM_SIZE", "1"))
+    condition_previous = os.getenv("WHISPER_CONDITION_PREVIOUS", "false").lower() in ("1", "true", "yes")
     segments_generator, info = model.transcribe(
         audio_path,
         language=whisper_lang,
         task="transcribe",
-        beam_size=5,
-        condition_on_previous_text=True,
+        beam_size=beam_size,
+        condition_on_previous_text=condition_previous,
         vad_filter=True,
-        vad_parameters=dict(min_silence_duration_ms=500),
+        vad_parameters=dict(
+            min_silence_duration_ms=int(os.getenv("WHISPER_VAD_MIN_SILENCE_MS", "300")),
+        ),
         word_timestamps=False,
     )
     

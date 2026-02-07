@@ -44,6 +44,12 @@ python main.py
 uvicorn main:app --host 0.0.0.0 --port 8004
 ```
 
+Если порт занят («Address already in use»), освободить принудительно:
+```bash
+fuser -k 8004/tcp
+# или: kill -9 $(lsof -t -i :8004)
+```
+
 ### 4. Автозапуск через systemd
 
 Создайте файл `/etc/systemd/system/whisper-worker.service`:
@@ -75,8 +81,14 @@ sudo systemctl status whisper-worker
 ## Конфигурация
 
 Переменные окружения:
-- `WORKER_PORT` - порт (по умолчанию 8004)
-- `WORKER_HOST` - хост (по умолчанию 0.0.0.0)
+- `WORKER_PORT` — порт (по умолчанию 8004)
+- `WORKER_HOST` — хост (по умолчанию 0.0.0.0)
+- `WHISPER_MODEL` — модель: `medium` (по умолчанию, оптимально для GTX 1660 Ti 6GB), `large-v3`, `small`, `base`
+- `WHISPER_DEVICE` — устройство: `cuda` или `cpu` (по умолчанию `cuda`)
+- `WHISPER_COMPUTE_TYPE` — точность на GPU: `float16` (по умолчанию), `int8_float16`, `int8`
+- `WHISPER_BEAM_SIZE` — размер луча поиска, 1=быстро (по умолчанию), 5=качество
+- `WHISPER_CONDITION_PREVIOUS` — учитывать предыдущий текст: `false` (быстро), `true` (качество)
+- `WHISPER_VAD_MIN_SILENCE_MS` — пауза (мс), после которой VAD режет сегмент: меньше = меньше режем, больше речи сохраняем (по умолчанию 300, было 500)
 
 ## API
 
