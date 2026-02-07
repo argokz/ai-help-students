@@ -60,24 +60,28 @@ class ASRService:
             remote_client = get_remote_client()
             if remote_client:
                 try:
-                    # Check if worker is available
-                    is_healthy = await remote_client.check_health()
-                    if is_healthy:
+                    # Check if worker is available (responds to requests)
+                    is_available = await remote_client.check_health()
+                    if is_available:
                         logger.info(f"Using remote worker for transcription: {audio_path}")
-                        result = await remote_client.transcribe(audio_path, language)
-                        
-                        # Simulate progress if callback provided (remote doesn't support real-time progress)
-                        if progress_callback and total_duration:
-                            try:
-                                progress_callback(1.0)  # Mark as complete
-                            except Exception:
-                                pass
-                        
-                        return result
+                        try:
+                            result = await remote_client.transcribe(audio_path, language)
+                            
+                            # Simulate progress if callback provided (remote doesn't support real-time progress)
+                            if progress_callback and total_duration:
+                                try:
+                                    progress_callback(1.0)  # Mark as complete
+                                except Exception:
+                                    pass
+                            
+                            return result
+                        except Exception as transcribe_error:
+                            logger.error(f"Remote transcription failed: {transcribe_error}, falling back to local")
+                            # Fall through to local transcription
                     else:
-                        logger.warning("Remote worker is not healthy, falling back to local")
+                        logger.warning("Remote worker is not available, falling back to local")
                 except Exception as e:
-                    logger.warning(f"Remote worker failed: {e}, falling back to local")
+                    logger.warning(f"Remote worker check failed: {e}, falling back to local")
         
         # Fallback to local transcription
         logger.info(f"Using local transcription: {audio_path}")
