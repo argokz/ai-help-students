@@ -230,11 +230,16 @@ def _transcribe_sync(audio_path: str, language: Optional[str], model) -> dict:
             "text": segment.text.strip(),
         })
     
-    duration = segments[-1]["end"] if segments else 0
+    # Длительность всего аудио (из faster_whisper), не только последнего сегмента
+    duration = getattr(info, "duration", None)
+    if duration is None and segments:
+        duration = segments[-1]["end"]
+    elif duration is None:
+        duration = 0.0
     return {
         "segments": segments,
         "language": info.language,
-        "duration": duration,
+        "duration": round(float(duration), 2),
         "language_probability": round(info.language_probability, 2),
     }
 
