@@ -58,25 +58,47 @@ def load_whisper_model():
         import asyncio
         from faster_whisper import WhisperModel
         
-        logger.info("Loading Whisper large-v3 model on CUDA...")
-        _whisper_model = WhisperModel(
-            "large-v3",
-            device="cuda",
-            compute_type="float16",  # Оптимально для GPU
-        )
+        # Определяем устройство из переменной окружения или пробуем CUDA
+        device = os.getenv("WHISPER_DEVICE", "cuda")
+        compute_type = os.getenv("WHISPER_COMPUTE_TYPE", "float16")
+        
+        # Пробуем загрузить на CUDA, если не получится - fallback на CPU
+        if device == "cuda":
+            try:
+                logger.info("Loading Whisper large-v3 model on CUDA...")
+                _whisper_model = WhisperModel(
+                    "large-v3",
+                    device="cuda",
+                    compute_type=compute_type,
+                )
+                logger.info("Whisper model loaded successfully on CUDA")
+            except Exception as e:
+                logger.warning(f"Failed to load on CUDA: {e}, falling back to CPU")
+                device = "cpu"
+                compute_type = "int8"
+        
+        if device == "cpu" or _whisper_model is None:
+            logger.info("Loading Whisper large-v3 model on CPU...")
+            _whisper_model = WhisperModel(
+                "large-v3",
+                device="cpu",
+                compute_type="int8",
+            )
+            logger.info("Whisper model loaded successfully on CPU")
+        
         _model_lock = asyncio.Lock()
-        logger.info("Whisper model loaded successfully")
     return _whisper_model, _model_lock
 
 
 @app.get("/")
 async def root():
     """Health check."""
+    device = os.getenv("WHISPER_DEVICE", "cuda")
     return {
         "status": "ok",
         "service": "whisper-worker",
         "model": "large-v3",
-        "device": "cuda"
+        "device": device
     }
 
 
@@ -85,10 +107,13 @@ async def health():
     """Detailed health check."""
     try:
         model, _ = load_whisper_model()
+        device = os.getenv("WHISPER_DEVICE", "cuda")
+        # Определяем реальное устройство
+        actual_device = "cuda" if hasattr(model, "_model") and hasattr(model._model, "device") else "cpu"
         return {
             "status": "healthy",
             "model": "large-v3",
-            "device": "cuda",
+            "device": actual_device,
             "model_loaded": model is not None
         }
     except Exception as e:
