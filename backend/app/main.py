@@ -25,6 +25,8 @@ def _setup_logging() -> None:
         h.setFormatter(logging.Formatter(fmt, datefmt=datefmt))
     logging.basicConfig(level=level, handlers=handlers, force=True)
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)  # меньше шума от access-логов
+    # Подавляем ошибки телеметрии ChromaDB (не критичные)
+    logging.getLogger("chromadb.telemetry.product.posthog").setLevel(logging.CRITICAL)
 
 _setup_logging()
 logger = logging.getLogger(__name__)

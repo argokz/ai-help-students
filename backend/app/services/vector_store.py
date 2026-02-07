@@ -1,6 +1,10 @@
 """Vector store service using ChromaDB."""
+import os
 import asyncio
 from typing import Optional
+
+# Отключаем телеметрию ChromaDB через переменную окружения
+os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
@@ -32,6 +36,16 @@ class VectorStore:
                     allow_reset=True,
                 )
             )
+            # Дополнительно отключаем телеметрию (на случай если настройка выше не сработала)
+            try:
+                import chromadb.telemetry.product.posthog as posthog_module
+                if hasattr(posthog_module, 'capture'):
+                    # Заменяем capture на no-op функцию
+                    def noop_capture(*args, **kwargs):
+                        pass
+                    posthog_module.capture = noop_capture
+            except Exception:
+                pass  # Игнорируем если не получилось отключить
         return self._client
     
     def _collection_name(self, lecture_id: str) -> str:
