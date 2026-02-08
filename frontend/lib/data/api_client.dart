@@ -103,7 +103,15 @@ class ApiClient {
   }
 
   Future<Lecture> getLecture(String id) async {
-    final response = await _dio.get('/lectures/$id');
+    // Для polling используем безопасный таймаут (60 сек)
+    // GET /lectures/{id} - это просто чтение из БД, должно быть быстро
+    // Но даём запас на случай медленного ответа БД или сетевых задержек
+    final response = await _dio.get(
+      '/lectures/$id',
+      options: Options(
+        receiveTimeout: const Duration(seconds: 60),  // Безопасный таймаут для polling
+      ),
+    );
     return Lecture.fromJson(response.data as Map<String, dynamic>);
   }
 

@@ -275,18 +275,32 @@ async def process_lecture_transcription(
             pass
 
     try:
-        result = await asr_service.transcribe(
-            audio_path,
-            language,
-            total_duration=total_duration,
-            progress_callback=on_progress if total_duration else None,
+        # Таймаут для транскрибации: 3 часа для очень длинных лекций
+        # Для лекции 3 часа аудио на GPU может потребоваться ~1-2 часа обработки
+        # Плюс запас на сетевые задержки и fallback на CPU
+        result = await asyncio.wait_for(
+            asr_service.transcribe(
+                audio_path,
+                language,
+                total_duration=total_duration,
+                progress_callback=on_progress if total_duration else None,
+            ),
+            timeout=10800.0,  # 3 hours - достаточно для лекций до 3-4 часов аудио
         )
+    except asyncio.TimeoutError:
+        error_msg = "Превышено время ожидания транскрибации (3 часа). Файл слишком большой или сервер перегружен."
+        logger.error("Transcription timeout: lecture_id=%s path=%s duration=%s", 
+                     lecture_id, audio_path, total_duration)
+        async with AsyncSessionLocal() as db:
+            await storage_service.update_lecture_status(lecture_id, "failed", db)
+            await storage_service.update_lecture_metadata(lecture_id, {"error": error_msg}, db)
+        return
     except Exception as e:
         logger.exception("Lecture transcription failed: lecture_id=%s path=%s", lecture_id, audio_path)
         async with AsyncSessionLocal() as db:
             await storage_service.update_lecture_status(lecture_id, "failed", db)
             await storage_service.update_lecture_metadata(lecture_id, {"error": str(e)}, db)
-        raise
+        return  # Не поднимаем исключение, чтобы не крашить background task
 
     async with AsyncSessionLocal() as db:
         await storage_service.save_transcript(lecture_id, result, db)

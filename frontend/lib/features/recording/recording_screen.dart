@@ -66,6 +66,19 @@ class _RecordingScreenState extends State<RecordingScreen> {
   Future<void> _stopRecording() async {
     final path = await recordingService.stopRecording();
     if (path != null && mounted) {
+      // Автоматически сохраняем запись в локальные записи
+      final title = _titleController.text.trim();
+      final language = _selectedLanguage == 'auto' ? null : _selectedLanguage;
+      
+      final local = LocalRecording(
+        path: path,
+        title: title.isEmpty ? 'Запись ${DateTime.now().toString().substring(0, 16)}' : title,
+        language: language,
+        createdAtMillis: DateTime.now().millisecondsSinceEpoch,
+      );
+      await localRecordingsRepository.add(local);
+      
+      // Показываем диалог для загрузки на сервер
       _showUploadDialog(path);
     }
   }

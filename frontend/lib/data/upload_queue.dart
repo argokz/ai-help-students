@@ -11,7 +11,11 @@ class UploadQueueNotifier extends ChangeNotifier {
   final List<UploadTask> _tasks = [];
   final ApiClient _api = apiClient;
   static const _pollInterval = Duration(seconds: 5);
+  static const _maxPollingDuration = Duration(minutes: 30); // Максимальное время polling
+  static const _maxConsecutiveErrors = 5; // Максимум ошибок подряд перед остановкой
   final Map<String, Timer> _pollTimers = {};
+  final Map<String, DateTime> _pollingStartTimes = {}; // Когда начали polling
+  final Map<String, int> _consecutiveErrors = {}; // Счётчик ошибок подряд
   /// Вызывается, когда лекция перешла в completed — можно обновить список.
   void Function()? onLectureCompleted;
 
@@ -94,12 +98,24 @@ class UploadQueueNotifier extends ChangeNotifier {
     final lectureId = task.lectureId;
     if (lectureId == null) return;
 
+    _pollingStartTimes[task.id] = DateTime.now();
+    _consecutiveErrors[task.id] = 0;
+
     void poll() async {
+      // Проверка таймаута
+      final startTime = _pollingStartTimes[task.id];
+      if (startTime != null && DateTime.now().difference(startTime) > _maxPollingDuration) {
+        _stopPolling(task, 'Превышено время ожидания обработки (${_maxPollingDuration.inMinutes} минут)');
+        return;
+      }
+
       try {
         final lecture = await _api.getLecture(lectureId);
+        // Сбрасываем счётчик ошибок при успешном запросе
+        _consecutiveErrors[task.id] = 0;
+        
         if (lecture.status == 'completed') {
-          _pollTimers[task.id]?.cancel();
-          _pollTimers.remove(task.id);
+          _stopPolling(task);
           task.status = UploadTaskStatus.completed;
           _notifyListenersSafely();
           onLectureCompleted?.call();
@@ -107,8 +123,7 @@ class UploadQueueNotifier extends ChangeNotifier {
           return;
         }
         if (lecture.status == 'failed') {
-          _pollTimers[task.id]?.cancel();
-          _pollTimers.remove(task.id);
+          _stopPolling(task, 'Ошибка обработки на сервере');
           task.status = UploadTaskStatus.failed;
           task.errorMessage = 'Ошибка обработки на сервере';
           _notifyListenersSafely();
@@ -118,12 +133,41 @@ class UploadQueueNotifier extends ChangeNotifier {
           task.processingProgress = lecture.processingProgress;
           _notifyListenersSafely();
         }
-      } catch (_) {}
+      } catch (e) {
+        // Увеличиваем счётчик ошибок
+        final errorCount = (_consecutiveErrors[task.id] ?? 0) + 1;
+        _consecutiveErrors[task.id] = errorCount;
+        
+        // Если слишком много ошибок подряд - останавливаем polling
+        if (errorCount >= _maxConsecutiveErrors) {
+          final errorMsg = e.toString().contains('timeout') || e.toString().contains('Timeout')
+              ? 'Сервер не отвечает. Проверьте подключение.'
+              : 'Ошибка соединения с сервером';
+          _stopPolling(task, errorMsg);
+          return;
+        }
+        
+        // Логируем ошибку, но продолжаем polling
+        debugPrint('Polling error for task ${task.id}: $e (attempt $errorCount/$_maxConsecutiveErrors)');
+      }
     }
 
     poll();
     final timer = Timer.periodic(_pollInterval, (_) => poll());
     _pollTimers[task.id] = timer;
+  }
+
+  void _stopPolling(UploadTask task, [String? errorMessage]) {
+    _pollTimers[task.id]?.cancel();
+    _pollTimers.remove(task.id);
+    _pollingStartTimes.remove(task.id);
+    _consecutiveErrors.remove(task.id);
+    
+    if (errorMessage != null && task.status != UploadTaskStatus.completed) {
+      task.status = UploadTaskStatus.failed;
+      task.errorMessage = errorMessage;
+      _notifyListenersSafely();
+    }
   }
 
   void _removeTaskLater(UploadTask task) {
@@ -155,8 +199,7 @@ class UploadQueueNotifier extends ChangeNotifier {
   }
 
   void remove(UploadTask task) {
-    _pollTimers[task.id]?.cancel();
-    _pollTimers.remove(task.id);
+    _stopPolling(task);
     _tasks.remove(task);
     notifyListeners();
   }

@@ -18,17 +18,20 @@ class AppConfig {
   // Timeouts
   // ===========================================
   
-  /// Connection timeout in seconds
+  /// Connection timeout in seconds (быстрое обнаружение недоступности сервера)
   static const int connectTimeout = 30;
   
   /// Receive timeout in seconds (for long operations like transcription)
-  static const int receiveTimeout = 120;
+  /// Увеличено для больших файлов - до 30 минут
+  static const int receiveTimeout = 1800;
   
   /// Send timeout for upload (large files). In seconds.
-  static const int uploadSendTimeout = 600;
+  /// 30 минут для загрузки очень больших файлов (до 500MB+)
+  static const int uploadSendTimeout = 1800;
   
   /// Receive timeout for upload response. In seconds.
-  static const int uploadReceiveTimeout = 180;
+  /// 15 минут для получения ответа после загрузки большого файла
+  static const int uploadReceiveTimeout = 900;
   
   // ===========================================
   // Google Sign-In

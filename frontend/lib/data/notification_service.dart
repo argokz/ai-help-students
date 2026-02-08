@@ -11,6 +11,9 @@ class NotificationService {
 
   final FlutterLocalNotificationsPlugin _notifications = FlutterLocalNotificationsPlugin();
   bool _initialized = false;
+  
+  /// Публичный доступ к notifications для обновления уведомлений записи
+  FlutterLocalNotificationsPlugin get notifications => _notifications;
 
   Future<void> initialize() async {
     if (_initialized) return;

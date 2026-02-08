@@ -20,7 +20,15 @@ class RemoteASRClient:
             worker_url: Base URL of the worker service (e.g., http://100.115.128.128:8004)
         """
         self.worker_url = worker_url.rstrip('/')
-        self.timeout = aiohttp.ClientTimeout(total=3600)  # 1 hour timeout for long files
+        # Таймауты для больших файлов:
+        # - connect: быстрое обнаружение недоступности (30 сек)
+        # - sock_read: долгое ожидание ответа для длинных транскрибаций (1 час)
+        # - total: максимальное время всей операции (3 часа для очень длинных лекций)
+        self.timeout = aiohttp.ClientTimeout(
+            total=10800,  # 3 hours total для очень длинных лекций (3+ часа аудио)
+            connect=30,   # 30 seconds to connect - быстрое обнаружение недоступности
+            sock_read=3600,  # 1 hour max wait for response chunk - для длинных транскрибаций
+        )
     
     async def check_health(self) -> bool:
         """Check if worker is available and responding."""

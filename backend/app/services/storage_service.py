@@ -107,6 +107,16 @@ class StorageService:
     ) -> None:
         await self.update_lecture_metadata(lecture_id, {"status": status}, db)
 
+    async def get_incomplete_lectures(self, db: AsyncSession) -> list[dict]:
+        """Получить все лекции со статусом pending или processing для восстановления после перезагрузки."""
+        result = await db.execute(
+            select(Lecture).where(
+                Lecture.status.in_(["pending", "processing"])
+            )
+        )
+        lectures = result.scalars().all()
+        return [self._lecture_to_dict(l) for l in lectures]
+
     async def list_lectures(
         self,
         user_id: str,
