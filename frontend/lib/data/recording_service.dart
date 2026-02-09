@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
+import 'recording_foreground_task.dart';
 
 class RecordingService extends ChangeNotifier {
   static final RecordingService _instance = RecordingService._internal();
@@ -35,9 +37,16 @@ class RecordingService extends ChangeNotifier {
     final path = '${directory.path}/lecture_$timestamp.m4a';
     _currentPath = path;
 
-    // Check permissions should be handled by UI before calling this, 
-    // but good to have a check if possible. Assuming mostly granted.
-    
+    // На Android запускаем foreground-сервис с типом microphone, чтобы при
+    // блокировке экрана запись не прерывалась и микрофон продолжал работать.
+    if (Platform.isAndroid) {
+      final started = await startRecordingForegroundService();
+      if (!started) {
+        // Не удалось запустить сервис — запись может оборваться при блокировке
+        debugPrint('RecordingService: foreground service failed to start');
+      }
+    }
+
     await _recorder.start(
       const RecordConfig(encoder: AudioEncoder.aacLc),
       path: path,
@@ -70,15 +79,12 @@ class RecordingService extends ChangeNotifier {
     
     _timer?.cancel();
     final path = await _recorder.stop();
-    // Assuming path matches _currentPath
+    if (Platform.isAndroid) await stopRecordingForegroundService();
     
     _isRecording = false;
     _isPaused = false;
-    // We keep _duration and _currentPath for a moment in case UI needs it, 
-    // or we can reset them. Let's reset them after returning.
     final resultPath = _currentPath;
 
-    // Reset state
     _currentPath = null;
     _duration = Duration.zero;
     notifyListeners();
@@ -89,14 +95,23 @@ class RecordingService extends ChangeNotifier {
   // Cancel recording and delete file
   Future<void> cancelRecording() async {
     _timer?.cancel();
-     if (_isRecording) {
+    if (_isRecording) {
       await _recorder.stop();
-     }
-     _isRecording = false;
-     _isPaused = false;
-     _currentPath = null;
-     _duration = Duration.zero;
-     notifyListeners();
+      if (Platform.isAndroid) await stopRecordingForegroundService();
+    }
+    _isRecording = false;
+    _isPaused = false;
+    _currentPath = null;
+    _duration = Duration.zero;
+    notifyListeners();
+  }
+
+  static String _formatDuration(Duration d) {
+    final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    final hours = d.inHours;
+    if (hours > 0) return '$hours:$minutes:$seconds';
+    return '$minutes:$seconds';
   }
 
   void _startTimer() {
@@ -104,6 +119,7 @@ class RecordingService extends ChangeNotifier {
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!_isPaused && _isRecording) {
         _duration += const Duration(seconds: 1);
+        updateRecordingNotificationText(_formatDuration(_duration));
         notifyListeners();
       }
     });

@@ -1,5 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../../data/recording_service.dart';
 import '../../data/notification_service.dart';
 import '../../app/routes.dart';
@@ -51,7 +52,7 @@ class _RecordingOverlayState extends State<RecordingOverlay> {
       _notificationId,
       'Идёт запись...',
       durationText,
-      const NotificationDetails(
+      NotificationDetails(
         android: AndroidNotificationDetails(
           'recording',
           'Запись лекции',
