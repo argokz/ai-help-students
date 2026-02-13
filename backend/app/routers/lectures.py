@@ -34,6 +34,7 @@ class UploadInitResponse(PydanticBaseModel):
     upload_id: str
 from ..services.asr_service import asr_service
 from ..services.storage_service import storage_service
+from ..services.lectures_repo import lectures_repo
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter()
@@ -142,7 +143,6 @@ async def complete_upload(
     
     lecture_title = title or filename or f"Лекция {datetime.now().strftime('%Y-%m-%d %H:%M')}"
     lecture_data = {
-        "id": lecture_id,
         "title": lecture_title,
         "filename": filename,
         "audio_path": str(final_path),
@@ -152,7 +152,7 @@ async def complete_upload(
         "group_name": group_name,
     }
 
-    await storage_service.save_lecture_metadata(lecture_id, current_user.id, lecture_data, db)
+    await lectures_repo.create(lecture_id, current_user.id, lecture_data, db)
 
     background_tasks.add_task(
         process_lecture_transcription,
@@ -211,7 +211,6 @@ async def upload_lecture(
 
     lecture_title = title or file.filename or f"Лекция {datetime.now().strftime('%Y-%m-%d %H:%M')}"
     lecture_data = {
-        "id": lecture_id,
         "title": lecture_title,
         "filename": file.filename,
         "audio_path": str(audio_path),
@@ -221,7 +220,7 @@ async def upload_lecture(
         "group_name": group_name,
     }
 
-    await storage_service.save_lecture_metadata(lecture_id, current_user.id, lecture_data, db)
+    await lectures_repo.create(lecture_id, current_user.id, lecture_data, db)
 
     background_tasks.add_task(
         process_lecture_transcription,
@@ -261,7 +260,7 @@ async def process_lecture_transcription(
 
     async def update_progress(progress: float) -> None:
         async with AsyncSessionLocal() as db:
-            await storage_service.update_lecture_metadata(
+            await lectures_repo.update(
                 lecture_id, {"processing_progress": round(progress, 3)}, db
             )
 
@@ -270,7 +269,7 @@ async def process_lecture_transcription(
 
     async with AsyncSessionLocal() as db:
         try:
-            await storage_service.update_lecture_status(lecture_id, "processing", db)
+            await lectures_repo.update_status(lecture_id, "processing", db)
         finally:
             pass
 
@@ -292,25 +291,26 @@ async def process_lecture_transcription(
         logger.error("Transcription timeout: lecture_id=%s path=%s duration=%s", 
                      lecture_id, audio_path, total_duration)
         async with AsyncSessionLocal() as db:
-            await storage_service.update_lecture_status(lecture_id, "failed", db)
-            await storage_service.update_lecture_metadata(lecture_id, {"error": error_msg}, db)
+            await lectures_repo.update_status(lecture_id, "failed", db)
+            await lectures_repo.update(lecture_id, {"error": error_msg}, db)
         return
     except Exception as e:
         logger.exception("Lecture transcription failed: lecture_id=%s path=%s", lecture_id, audio_path)
         async with AsyncSessionLocal() as db:
-            await storage_service.update_lecture_status(lecture_id, "failed", db)
-            await storage_service.update_lecture_metadata(lecture_id, {"error": str(e)}, db)
+            await lectures_repo.update_status(lecture_id, "failed", db)
+            await lectures_repo.update(lecture_id, {"error": str(e)}, db)
         return  # Не поднимаем исключение, чтобы не крашить background task
 
     async with AsyncSessionLocal() as db:
         await storage_service.save_transcript(lecture_id, result, db)
-        await storage_service.update_lecture_metadata(
+        await lectures_repo.update(
             lecture_id,
             {
                 "status": "completed",
                 "language": result.get("language"),
                 "duration": result.get("duration"),
                 "processing_progress": None,
+                "has_transcript": True
             },
             db,
         )
@@ -347,11 +347,11 @@ async def list_lectures(
     group_name: Optional[str] = None,
 ):
     """List current user's lectures. Фильтр по предмету и/или группе."""
-    lectures = await storage_service.list_lectures(
+    lectures = await lectures_repo.list(
         current_user.id, db, subject=subject, group_name=group_name
     )
-    subjects = await storage_service.list_subjects(current_user.id, db)
-    groups = await storage_service.list_groups(current_user.id, db)
+    subjects = await lectures_repo.list_subjects(current_user.id, db)
+    groups = await lectures_repo.list_groups(current_user.id, db)
     return LectureListResponse(
         lectures=[_lecture_to_response(l) for l in lectures],
         total=len(lectures),
@@ -396,7 +396,7 @@ async def get_lecture(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Get lecture by ID. Must belong to current user."""
-    lecture = await storage_service.get_lecture_metadata(lecture_id, db)
+    lecture = await lectures_repo.get(lecture_id, db)
     if not lecture:
         raise HTTPException(status_code=404, detail="Lecture not found")
     _check_lecture_owner(lecture, current_user.id)
@@ -418,7 +418,7 @@ async def update_lecture(
     """Обновить предмет и/или группу лекции."""
     if body is None:
         body = _LectureUpdateBody()
-    lecture = await storage_service.get_lecture_metadata(lecture_id, db)
+    lecture = await lectures_repo.get(lecture_id, db)
     if not lecture:
         raise HTTPException(status_code=404, detail="Lecture not found")
     _check_lecture_owner(lecture, current_user.id)
@@ -428,8 +428,8 @@ async def update_lecture(
     if body.group_name is not None:
         updates["group_name"] = body.group_name if body.group_name != "" else None
     if updates:
-        await storage_service.update_lecture_metadata(lecture_id, updates, db)
-        lecture = await storage_service.get_lecture_metadata(lecture_id, db)
+        await lectures_repo.update(lecture_id, updates, db)
+        lecture = await lectures_repo.get(lecture_id, db)
     return _lecture_to_response(lecture)
 
 
@@ -440,7 +440,7 @@ async def get_transcript(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Get transcript. Lecture must belong to current user."""
-    lecture = await storage_service.get_lecture_metadata(lecture_id, db)
+    lecture = await lectures_repo.get(lecture_id, db)
     if not lecture:
         raise HTTPException(status_code=404, detail="Lecture not found")
     _check_lecture_owner(lecture, current_user.id)
@@ -477,7 +477,7 @@ async def get_lecture_audio(
         download: Если True, отдаёт как вложение (для скачивания). 
                   Если False (по умолчанию), отдаёт inline (для воспроизведения).
     """
-    lecture = await storage_service.get_lecture_metadata(lecture_id, db)
+    lecture = await lectures_repo.get(lecture_id, db)
     if not lecture:
         raise HTTPException(status_code=404, detail="Lecture not found")
     _check_lecture_owner(lecture, current_user.id)
@@ -523,9 +523,10 @@ async def extract_tasks_from_lecture(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Extract tasks and deadlines from lecture transcript using AI."""
-    lecture = await db.get(Lecture, lecture_id)
-    if not lecture or lecture.user_id != current_user.id:
+    lecture = await lectures_repo.get(lecture_id, db)
+    if not lecture:
         raise HTTPException(404, "Lecture not found")
+    _check_lecture_owner(lecture, current_user.id)
     
     # Get transcript from storage service
     transcript = await storage_service.get_transcript(lecture_id)
@@ -539,7 +540,8 @@ async def extract_tasks_from_lecture(
     
     # Extract tasks
     from ..services.task_extractor import task_extractor
-    tasks = await task_extractor.extract_tasks(full_text, lecture.created_at)
+    created_at_dt = datetime.fromisoformat(lecture["created_at"])
+    tasks = await task_extractor.extract_tasks(full_text, created_at_dt)
     
     return {"tasks": tasks, "lecture_id": lecture_id}
 
@@ -551,13 +553,15 @@ async def delete_lecture(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Delete lecture. Must belong to current user."""
-    lecture = await storage_service.get_lecture_metadata(lecture_id, db)
+    lecture = await lectures_repo.get(lecture_id, db)
     if not lecture:
         raise HTTPException(status_code=404, detail="Lecture not found")
     _check_lecture_owner(lecture, current_user.id)
 
     from ..services.vector_store import vector_store
-    await storage_service.delete_lecture(lecture_id, db)
+    
+    await lectures_repo.delete(lecture_id, db)
+    await storage_service.delete_lecture_files(lecture_id)
     await vector_store.delete_lecture(lecture_id)
     await db.commit()
     return {"status": "deleted", "id": lecture_id}

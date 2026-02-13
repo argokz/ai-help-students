@@ -101,26 +101,24 @@ class TaskExtractor:
         try:
             # Use chunking for long transcripts
             max_chunk_size = 15000  # Increased from 4000
+            
             if len(transcript) > max_chunk_size:
                 # Process in chunks and merge results
                 from ..services.chunker_service import chunker_service
-                chunks = chunker_service.chunk_text(transcript, preserve_sentences=True)
+                
+                chunks = chunker_service.chunk_text_by_size(
+                    transcript,
+                    chunk_size=max_chunk_size,
+                    preserve_sentences=True
+                )
+                
                 all_tasks = []
                 
                 for i, chunk in enumerate(chunks):
-                    if len(chunk) > max_chunk_size:
-                        # Further split if needed
-                        for j in range(0, len(chunk), max_chunk_size):
-                            sub_chunk = chunk[j:j+max_chunk_size]
-                            chunk_tasks = await self._extract_from_chunk(
-                                sub_chunk, reference_date, current_date_str, f"{i+1}.{j//max_chunk_size+1}"
-                            )
-                            all_tasks.extend(chunk_tasks)
-                    else:
-                        chunk_tasks = await self._extract_from_chunk(
-                            chunk, reference_date, current_date_str, str(i+1)
-                        )
-                        all_tasks.extend(chunk_tasks)
+                    chunk_tasks = await self._extract_from_chunk(
+                        chunk, reference_date, current_date_str, str(i+1)
+                    )
+                    all_tasks.extend(chunk_tasks)
                 
                 # Deduplicate tasks
                 seen_titles = set()

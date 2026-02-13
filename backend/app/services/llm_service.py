@@ -606,18 +606,18 @@ class LLMService:
         """Generate summary for large lecture using chunking."""
         import logging
         
-        # Split text into chunks
-        chunks = chunker_service.chunk_text(text, preserve_sentences=True)
-        
-        # Adjust chunk size to fit within limits
-        adjusted_chunks = []
-        for chunk in chunks:
-            if len(chunk) > chunk_size:
-                # Further split if needed
-                for i in range(0, len(chunk), chunk_size):
-                    adjusted_chunks.append(chunk[i:i+chunk_size])
-            else:
-                adjusted_chunks.append(chunk)
+        # Split text into chunks using unified service
+        # Note: chunker_service is passed as arg or we can import global
+        if chunker_service is None:
+            from .chunker_service import chunker_service as global_chunker
+            chunker_service = global_chunker
+
+        # Use soft limit with sentence preservation
+        adjusted_chunks = chunker_service.chunk_text_by_size(
+            text, 
+            chunk_size=chunk_size, 
+            preserve_sentences=True
+        )
         
         # Process each chunk
         chunk_summaries = []

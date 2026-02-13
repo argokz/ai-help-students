@@ -174,6 +174,65 @@ class ChunkerService:
         
         return chunks
 
+    def chunk_text_by_size(
+        self,
+        text: str,
+        chunk_size: int,
+        preserve_sentences: bool = True
+    ) -> list[str]:
+        """
+        Chunk text by character limit (approximate).
+        
+        Args:
+            text: Text to split
+            chunk_size: Maximum characters per chunk (soft limit if preserve_sentences=True)
+            preserve_sentences: If True, try to split at sentence boundaries.
+        """
+        if not text:
+            return []
+            
+        if len(text) <= chunk_size:
+            return [text]
+            
+        chunks = []
+        if preserve_sentences:
+            # Split by common sentence endings
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            current_chunk = []
+            current_len = 0
+            
+            for sentence in sentences:
+                sent_len = len(sentence)
+                
+                # If single sentence is too long, force split it
+                if sent_len > chunk_size:
+                    if current_chunk:
+                        chunks.append(" ".join(current_chunk))
+                        current_chunk = []
+                        current_len = 0
+                    
+                    # Split long sentence by hard limit
+                    for i in range(0, sent_len, chunk_size):
+                        chunks.append(sentence[i:i+chunk_size])
+                    continue
+                
+                if current_len + sent_len > chunk_size and current_chunk:
+                    chunks.append(" ".join(current_chunk))
+                    current_chunk = []
+                    current_len = 0
+                
+                current_chunk.append(sentence)
+                current_len += sent_len + 1  # +1 for space
+            
+            if current_chunk:
+                chunks.append(" ".join(current_chunk))
+        else:
+            # Hard split
+            for i in range(0, len(text), chunk_size):
+                chunks.append(text[i:i+chunk_size])
+                
+        return chunks
+
 
 # Global instance
 chunker_service = ChunkerService()
