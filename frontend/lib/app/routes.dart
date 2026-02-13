@@ -14,12 +14,12 @@ import '../features/notes/notes_screen.dart';
 import '../features/notes/note_detail_screen.dart';
 import '../features/calendar/calendar_screen.dart';
 import '../features/calendar/calendar_event_detail_screen.dart';
-import '../features/tasks/tasks_screen.dart';
-import '../features/tasks/task_detail_screen.dart';
+import '../features/main/main_screen.dart';
 
 class AppRoutes {
   static const String login = '/';
   static const String register = '/register';
+  static const String main = '/main'; // New main route
   static const String lectures = '/lectures';
   static const String lectureDetail = '/lecture';
   static const String recording = '/recording';
@@ -45,6 +45,10 @@ class AppRoutes {
       case register:
         return MaterialPageRoute(
           builder: (_) => const RegisterScreen(),
+        );
+      case main:
+        return MaterialPageRoute(
+          builder: (_) => const MainScreen(),
         );
       case lectures:
         return MaterialPageRoute(

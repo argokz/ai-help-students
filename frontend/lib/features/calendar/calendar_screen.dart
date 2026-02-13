@@ -6,21 +6,22 @@ import '../../data/api_client.dart';
 import '../../app/routes.dart';
 import '../../core/config/app_config.dart';
 import '../../core/utils/error_handler.dart';
+import '../../core/mixins/safe_execution_mixin.dart';
 
 class CalendarScreen extends StatefulWidget {
-  const CalendarScreen({super.key});
+  final bool isMainTab;
+  const CalendarScreen({super.key, this.isMainTab = false});
 
   @override
   State<CalendarScreen> createState() => _CalendarScreenState();
 }
 
-class _CalendarScreenState extends State<CalendarScreen> {
+class _CalendarScreenState extends State<CalendarScreen> with SafeExecutionMixin {
   CalendarFormat _calendarFormat = CalendarFormat.month;
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
   
   List<CalendarEvent> _events = [];
-  bool _isLoading = false;
   
   @override
   void initState() {
@@ -30,11 +31,11 @@ class _CalendarScreenState extends State<CalendarScreen> {
   }
 
   Future<void> _loadEvents() async {
-    setState(() => _isLoading = true);
-    try {
+    await safeExecute(() async {
       // Load events for current month
-      final start = DateTime(_focusedDay.year, _focusedDay.month, 1);
-      final end = DateTime(_focusedDay.year, _focusedDay.month + 1, 0);
+      // We often need a bit more range for monthly view to show trailing/leading days
+      final start = DateTime(_focusedDay.year, _focusedDay.month - 1, 20); 
+      final end = DateTime(_focusedDay.year, _focusedDay.month + 2, 10);
       
       final events = await apiClient.getCalendarEvents(
         startDate: start,
@@ -44,27 +45,18 @@ class _CalendarScreenState extends State<CalendarScreen> {
       if (mounted) {
         setState(() {
           _events = events;
-          _isLoading = false;
         });
       }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Ошибка: ${ErrorHandler.getMessage(e)}')),
-        );
-      }
-    }
+    });
   }
 
   Future<void> _linkGoogleCalendar() async {
-    try {
+    await safeExecute(() async {
       final googleSignIn = GoogleSignIn(
         serverClientId: AppConfig.googleClientId,
         scopes: ['https://www.googleapis.com/auth/calendar.events'],
       );
       
-      // Force user to choose account and give consent to get refresh token
       final account = await googleSignIn.signIn();
       if (account == null) return;
       
@@ -75,30 +67,19 @@ class _CalendarScreenState extends State<CalendarScreen> {
         throw Exception('Не удалось получить код доступа от Google');
       }
       
-      setState(() => _isLoading = true);
       await apiClient.linkGoogleCalendar(serverAuthCode);
       
       if (mounted) {
-        setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Google Календарь успешно подключен!')),
         );
       }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Ошибка подключения: ${ErrorHandler.getMessage(e)}')),
-        );
-      }
-    }
+    }); // loading is handled by safeExecute
   }
 
   List<CalendarEvent> _getEventsForDay(DateTime day) {
     return _events.where((event) {
-      return event.startTime.year == day.year &&
-          event.startTime.month == day.month &&
-          event.startTime.day == day.day;
+      return isSameDay(event.startTime, day);
     }).toList();
   }
 
@@ -109,9 +90,10 @@ class _CalendarScreenState extends State<CalendarScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Календарь'),
+        automaticallyImplyLeading: !widget.isMainTab,
         actions: [
           IconButton(
-            icon: const Icon(Icons.sync), // or sync
+            icon: const Icon(Icons.sync),
             tooltip: 'Подключить Google Календарь',
             onPressed: _linkGoogleCalendar,
           ),
@@ -142,6 +124,11 @@ class _CalendarScreenState extends State<CalendarScreen> {
             calendarFormat: _calendarFormat,
             selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
             eventLoader: _getEventsForDay,
+            startingDayOfWeek: StartingDayOfWeek.monday,
+            headerStyle: const HeaderStyle(
+              formatButtonVisible: false,
+              titleCentered: true,
+            ),
             onDaySelected: (selectedDay, focusedDay) {
               setState(() {
                 _selectedDay = selectedDay;
@@ -172,7 +159,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
           ),
           const SizedBox(height: 8),
           Expanded(
-            child: _isLoading
+            child: isLoading
                 ? const Center(child: CircularProgressIndicator())
                 : selectedDayEvents.isEmpty
                     ? Center(
@@ -242,59 +229,60 @@ class _EventCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Container(
-                width: 4,
-                height: 60,
-                decoration: BoxDecoration(
-                  color: _getColor(event.color),
-                  borderRadius: BorderRadius.circular(2),
+          child: IntrinsicHeight(
+            child: Row(
+              children: [
+                Container(
+                  width: 4,
+                  decoration: BoxDecoration(
+                    color: _getColor(event.color),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      event.title,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Icon(Icons.access_time, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                        const SizedBox(width: 4),
-                        Text(
-                          event.timeRange,
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ],
-                    ),
-                    if (event.location != null) ...[
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        event.title,
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                      ),
                       const SizedBox(height: 4),
                       Row(
                         children: [
-                          Icon(Icons.location_on, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                          Icon(Icons.access_time, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
                           const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              event.location!,
-                              style: Theme.of(context).textTheme.bodySmall,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
+                          Text(
+                            event.timeRange,
+                            style: Theme.of(context).textTheme.bodySmall,
                           ),
                         ],
                       ),
+                      if (event.location != null) ...[
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Icon(Icons.location_on, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                event.location!,
+                                style: Theme.of(context).textTheme.bodySmall,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

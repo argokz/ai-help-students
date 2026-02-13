@@ -429,6 +429,11 @@ class ApiClient {
     return Task.fromJson(response.data);
   }
 
+  Future<Task> getTask(String id) async {
+    final response = await _dio.get('/tasks/$id');
+    return Task.fromJson(response.data);
+  }
+
   Future<Task> updateTask(String id, Map<String, dynamic> updates) async {
     final response = await _dio.patch('/tasks/$id', data: updates);
     return Task.fromJson(response.data);

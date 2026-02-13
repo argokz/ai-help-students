@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../../models/lecture.dart' show Lecture, LectureSearchResult;
-import '../../models/upload_task.dart';
 import '../../data/api_client.dart';
 import '../../data/auth_repository.dart';
 import '../../data/upload_queue.dart';
@@ -11,7 +10,8 @@ import '../../core/layout/responsive.dart';
 import '../../core/utils/error_handler.dart';
 
 class LecturesScreen extends StatefulWidget {
-  const LecturesScreen({super.key});
+  final bool isMainTab;
+  const LecturesScreen({super.key, this.isMainTab = false});
 
   @override
   State<LecturesScreen> createState() => _LecturesScreenState();
@@ -30,30 +30,13 @@ class _LecturesScreenState extends State<LecturesScreen> {
   String? _error;
   Timer? _processingTicker;
   final TextEditingController _searchController = TextEditingController();
-  String? _profileName;
-  String? _profileEmail;
-  String? _profilePhotoUrl;
 
   @override
   void initState() {
     super.initState();
     _loadLectures();
-    _loadProfile();
     uploadQueue.onLectureCompleted = _onLectureCompleted;
     _startProcessingTicker();
-  }
-
-  Future<void> _loadProfile() async {
-    final email = await authRepository.getEmail();
-    final name = await authRepository.getDisplayName();
-    final photo = await authRepository.getPhotoUrl();
-    if (mounted) {
-      setState(() {
-        _profileEmail = email;
-        _profileName = name;
-        _profilePhotoUrl = photo;
-      });
-    }
   }
 
   void _startProcessingTicker() {
@@ -224,40 +207,41 @@ class _LecturesScreenState extends State<LecturesScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Мои лекции'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.chat_bubble_outline),
-            tooltip: 'Общий чат по всем лекциям',
-            onPressed: () => Navigator.pushNamed(context, AppRoutes.globalChat),
-          ),
-          IconButton(
-            icon: const Icon(Icons.upload_file),
-            tooltip: 'Загрузить аудиофайл',
-            onPressed: _pickAndUploadFile,
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadLectures,
-          ),
-        ],
-      ),
-      drawer: _buildDrawer(context),
       body: ListenableBuilder(
         listenable: uploadQueue,
         builder: (context, _) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (uploadQueue.tasks.isNotEmpty)
-                _UploadTasksSection(
-                  tasks: uploadQueue.tasks,
-                  onRetry: uploadQueue.retry,
-                  onDismiss: uploadQueue.remove,
+          return RefreshIndicator(
+            onRefresh: _loadLectures,
+            child: CustomScrollView(
+              slivers: [
+                SliverAppBar(
+                  title: const Text('Мои лекции'),
+                  floating: true,
+                  pinned: true,
+                  actions: [
+                     IconButton(
+                      icon: const Icon(Icons.chat_bubble_outline),
+                      tooltip: 'Общий чат',
+                      onPressed: () => Navigator.pushNamed(context, AppRoutes.globalChat),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.upload_file),
+                      tooltip: 'Загрузить файл',
+                      onPressed: _pickAndUploadFile,
+                    ),
+                  ],
                 ),
-              Expanded(child: _buildBody()),
-            ],
+                if (uploadQueue.tasks.isNotEmpty)
+                  SliverToBoxAdapter(
+                    child: _UploadTasksSection(
+                      tasks: uploadQueue.tasks,
+                      onRetry: uploadQueue.retry,
+                      onDismiss: uploadQueue.remove,
+                    ),
+                  ),
+                _buildContent(),
+              ],
+            ),
           );
         },
       ),
@@ -271,224 +255,50 @@ class _LecturesScreenState extends State<LecturesScreen> {
     );
   }
 
-  Widget _buildDrawer(BuildContext context) {
-    final theme = Theme.of(context);
-    return Drawer(
-      child: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            InkWell(
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.pushNamed(context, AppRoutes.profile);
-              },
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
-                child: Row(
-                  children: [
-                    _DrawerAvatar(photoUrl: _profilePhotoUrl),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _profileName?.isNotEmpty == true
-                                ? _profileName!
-                                : (_profileEmail ?? 'Пользователь'),
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w600,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          if (_profileEmail != null) ...[
-                            const SizedBox(height: 2),
-                            Text(
-                              _profileEmail!,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.person_outline),
-              title: const Text('Профиль'),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.pushNamed(context, AppRoutes.profile);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.school_outlined),
-              title: const Text('Мои лекции'),
-              onTap: () => Navigator.pop(context),
-            ),
-            ListTile(
-              leading: const Icon(Icons.folder_outlined),
-              title: const Text('Локальные записи'),
-              onTap: () {
-                Navigator.pushNamed(context, AppRoutes.localRecordings);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.note_alt_outlined),
-              title: const Text('Заметки'),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.pushNamed(context, AppRoutes.notes);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.calendar_today),
-              title: const Text('Календарь'),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.pushNamed(context, AppRoutes.calendar);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.check_circle_outline),
-              title: const Text('Задачи'),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.pushNamed(context, AppRoutes.tasks);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.chat_bubble_outline),
-              title: const Text('Общий чат'),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.pushNamed(context, AppRoutes.globalChat);
-              },
-            ),
-            const Spacer(),
-            const Divider(height: 1),
-            ListTile(
-              leading: Icon(Icons.logout, color: theme.colorScheme.error),
-              title: Text('Выйти', style: TextStyle(color: theme.colorScheme.error)),
-              onTap: () async {
-                Navigator.pop(context);
-                await authRepository.logout();
-                if (!context.mounted) return;
-                Navigator.pushReplacementNamed(context, AppRoutes.login);
-              },
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBody() {
-    if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    if (_error != null) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.error_outline, size: 64, color: Colors.red),
-            const SizedBox(height: 16),
-            Text('Ошибка: $_error'),
-            const SizedBox(height: 16),
-            FilledButton(
-              onPressed: _loadLectures,
-              child: const Text('Повторить'),
-            ),
-          ],
-        ),
-      );
-    }
-
-    final showSearchResults = _searchResults != null;
-    final listEmpty = _lectures == null || _lectures!.isEmpty;
-    final searchEmpty = showSearchResults && _searchResults!.isEmpty;
-
-    if (!showSearchResults && listEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.school_outlined,
-              size: 80,
-              color: Theme.of(context).colorScheme.primary.withOpacity(0.5),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Пока нет записей',
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Нажмите "Записать" чтобы начать',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
+  Widget _buildContent() {
     final padding = Responsive.contentPadding(context);
     final crossAxisCount = Responsive.gridCrossAxisCount(context);
 
-    return RefreshIndicator(
-      onRefresh: _loadLectures,
-      child: CustomScrollView(
-        slivers: [
-          SliverPadding(
-            padding: EdgeInsets.fromLTRB(padding, padding, padding, 0),
-            sliver: SliverToBoxAdapter(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _searchController,
-                          decoration: const InputDecoration(
-                            hintText: 'Поиск по названию и тексту...',
-                            prefixIcon: Icon(Icons.search),
-                            border: OutlineInputBorder(),
-                            isDense: true,
-                          ),
-                          onSubmitted: (_) => _runSearch(),
+    return SliverPadding(
+      padding: EdgeInsets.fromLTRB(padding, 0, padding, padding + 80),
+      sliver: SliverList(
+        delegate: SliverChildListDelegate([
+           Column(
+             crossAxisAlignment: CrossAxisAlignment.stretch,
+             children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _searchController,
+                        decoration: const InputDecoration(
+                          hintText: 'Поиск по названию...',
+                          prefixIcon: Icon(Icons.search),
+                          isDense: true,
                         ),
+                        onSubmitted: (_) => _runSearch(),
                       ),
-                      const SizedBox(width: 8),
-                      IconButton.filled(
-                        onPressed: _isSearching ? null : _runSearch,
-                        icon: _isSearching
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.search),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton.filled(
+                      onPressed: _isSearching ? null : _runSearch,
+                      style: IconButton.styleFrom(
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
-                    ],
-                  ),
-                  if (_searchResults != null && _searchQuery.isNotEmpty) ...[
-                    TextButton(
+                      icon: _isSearching
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Icon(Icons.arrow_forward),
+                    ),
+                  ],
+                ),
+                if (_searchResults != null && _searchQuery.isNotEmpty) 
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton(
                       onPressed: () {
                         _searchController.clear();
                         setState(() {
@@ -498,151 +308,137 @@ class _LecturesScreenState extends State<LecturesScreen> {
                       },
                       child: const Text('Очистить поиск'),
                     ),
-                  ],
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    height: 44,
-                    child: ListView(
-                      scrollDirection: Axis.horizontal,
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: FilterChip(
-                            label: const Text('Все'),
-                            selected: _selectedSubject == null && _selectedGroup == null,
-                            onSelected: (_) async {
-                              setState(() {
-                                _selectedSubject = null;
-                                _selectedGroup = null;
-                              });
-                              await _loadLectures();
-                            },
-                          ),
+                  ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  height: 44,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: FilterChip(
+                          label: const Text('Все'),
+                          selected: _selectedSubject == null && _selectedGroup == null,
+                          onSelected: (_) async {
+                            setState(() {
+                              _selectedSubject = null;
+                              _selectedGroup = null;
+                            });
+                            await _loadLectures();
+                          },
                         ),
-                        ..._subjects.map((s) => Padding(
-                              padding: const EdgeInsets.only(right: 8),
-                              child: FilterChip(
-                                label: Text(s, overflow: TextOverflow.ellipsis),
-                                selected: _selectedSubject == s,
-                                onSelected: (_) async {
-                                  setState(() {
-                                    _selectedSubject = _selectedSubject == s ? null : s;
-                                    _selectedGroup = null;
-                                  });
-                                  await _loadLectures();
-                                },
-                              ),
-                            )),
-                        ..._groups.map((g) => Padding(
-                              padding: const EdgeInsets.only(right: 8),
-                              child: FilterChip(
-                                label: Text(g, overflow: TextOverflow.ellipsis),
-                                selected: _selectedGroup == g,
-                                onSelected: (_) async {
-                                  setState(() {
-                                    _selectedGroup = _selectedGroup == g ? null : g;
-                                    _selectedSubject = null;
-                                  });
-                                  await _loadLectures();
-                                },
-                              ),
-                            )),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                ],
-              ),
-            ),
-          ),
-          if (showSearchResults) ...[
-            if (searchEmpty)
-              const SliverFillRemaining(
-                hasScrollBody: false,
-                child: Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Text('Ничего не найдено'),
-                  ),
-                ),
-              )
-            else
-              SliverPadding(
-                padding: EdgeInsets.symmetric(horizontal: padding),
-                sliver: SliverList(
-                  delegate: SliverChildBuilderDelegate(
-                    (context, index) {
-                      final r = _searchResults![index];
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: _SearchResultCard(
-                          result: r,
-                          onTap: () => Navigator.pushNamed(
-                            context,
-                            AppRoutes.lectureDetail,
-                            arguments: r.id,
-                          ),
-                        ),
-                      );
-                    },
-                    childCount: _searchResults!.length,
-                  ),
-                ),
-              ),
-          ] else
-            SliverPadding(
-              padding: EdgeInsets.symmetric(horizontal: padding),
-              sliver: crossAxisCount > 1
-                  ? SliverGrid(
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: crossAxisCount,
-                        mainAxisSpacing: 12,
-                        crossAxisSpacing: 12,
-                        childAspectRatio: 1.05,
                       ),
-                      delegate: SliverChildBuilderDelegate(
-                        (context, index) {
-                          final lecture = _lectures![index];
-                          return _LectureCard(
-                            lecture: lecture,
-                            onTap: () {
-                              Navigator.pushNamed(
-                                context,
-                                AppRoutes.lectureDetail,
-                                arguments: lecture.id,
-                              );
-                            },
-                            onDelete: () => _onDeleteLecture(context, lecture),
-                          );
-                        },
-                        childCount: _lectures!.length,
-                      ),
-                    )
-                  : SliverList(
-                      delegate: SliverChildBuilderDelegate(
-                        (context, index) {
-                          final lecture = _lectures![index];
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: _LectureCard(
-                              lecture: lecture,
-                              onTap: () {
-                                Navigator.pushNamed(
-                                  context,
-                                  AppRoutes.lectureDetail,
-                                  arguments: lecture.id,
-                                );
+                      ..._subjects.map((s) => Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: FilterChip(
+                              label: Text(s, overflow: TextOverflow.ellipsis),
+                              selected: _selectedSubject == s,
+                              onSelected: (_) async {
+                                setState(() {
+                                  _selectedSubject = _selectedSubject == s ? null : s;
+                                  _selectedGroup = null;
+                                });
+                                await _loadLectures();
                               },
-                              onDelete: () => _onDeleteLecture(context, lecture),
                             ),
-                          );
-                        },
-                        childCount: _lectures!.length,
-                      ),
-                    ),
-            ),
-          SliverPadding(padding: EdgeInsets.only(bottom: padding + 80)),
-        ],
+                          )),
+                      ..._groups.map((g) => Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: FilterChip(
+                              label: Text(g, overflow: TextOverflow.ellipsis),
+                              selected: _selectedGroup == g,
+                              onSelected: (_) async {
+                                setState(() {
+                                  _selectedGroup = _selectedGroup == g ? null : g;
+                                  _selectedSubject = null;
+                                });
+                                await _loadLectures();
+                              },
+                            ),
+                          )),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+             ],
+           ),
+           if (_isLoading)
+             const Padding(
+               padding: EdgeInsets.all(32.0),
+               child: Center(child: CircularProgressIndicator()),
+             )
+           else if (_error != null)
+              Padding(
+               padding: EdgeInsets.all(32.0),
+               child: Center(
+                 child: Column(
+                   children: [
+                     const Icon(Icons.error_outline, size: 48, color: Colors.red),
+                     const SizedBox(height: 16),
+                     Text('Ошибка: $_error'),
+                     TextButton(onPressed: _loadLectures, child: const Text('Повторить')),
+                   ],
+                 ),
+               ),
+             )
+           else if ((_searchResults != null && _searchResults!.isEmpty) || (_lectures != null && _lectures!.isEmpty))
+              Padding(
+               padding: const EdgeInsets.all(32.0),
+               child: Center(
+                 child: Column(
+                   children: [
+                     Icon(Icons.school_outlined, size: 64, color: Theme.of(context).disabledColor),
+                     const SizedBox(height: 16),
+                     Text(
+                       _searchResults != null ? 'Ничего не найдено' : 'Нет лекций',
+                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                         color: Theme.of(context).disabledColor,
+                       ),
+                     ),
+                   ],
+                 ),
+               ),
+             )
+           else
+             ListView.builder(
+               shrinkWrap: true,
+               physics: const NeverScrollableScrollPhysics(),
+               itemCount: _searchResults?.length ?? _lectures?.length ?? 0,
+               itemBuilder: (context, index) {
+                 if (_searchResults != null) {
+                   final r = _searchResults![index];
+                   return Padding(
+                     padding: const EdgeInsets.only(bottom: 12),
+                     child: _SearchResultCard(
+                       result: r,
+                       onTap: () => Navigator.pushNamed(
+                         context,
+                         AppRoutes.lectureDetail,
+                         arguments: r.id,
+                       ),
+                     ),
+                   );
+                 } else {
+                   final lecture = _lectures![index];
+                   return Padding(
+                     padding: const EdgeInsets.only(bottom: 12),
+                     child: _LectureCard(
+                       lecture: lecture,
+                       onTap: () {
+                         Navigator.pushNamed(
+                           context,
+                           AppRoutes.lectureDetail,
+                           arguments: lecture.id,
+                         );
+                       },
+                       onDelete: () => _onDeleteLecture(context, lecture),
+                     ),
+                   );
+                 }
+               },
+             ),
+        ]),
       ),
     );
   }
@@ -705,10 +501,15 @@ class _LectureCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
     return Card(
-      margin: const EdgeInsets.only(bottom: 12),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: theme.dividerColor.withOpacity(0.5)),
+      ),
       child: InkWell(
         onTap: lecture.isReady ? onTap : null,
         borderRadius: BorderRadius.circular(16),
@@ -718,218 +519,101 @@ class _LectureCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: Text(
-                      lecture.title,
-                      style: Theme.of(context).textTheme.titleMedium,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
+                   Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          lecture.title,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if (lecture.subject != null || lecture.groupName != null) ...[
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            children: [
+                              if (lecture.subject != null && lecture.subject!.isNotEmpty)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: colorScheme.primaryContainer.withOpacity(0.5),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    lecture.subject!,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: colorScheme.onPrimaryContainer,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                              if (lecture.groupName != null && lecture.groupName!.isNotEmpty)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: colorScheme.secondaryContainer.withOpacity(0.5),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    lecture.groupName!,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: colorScheme.onSecondaryContainer,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                   PopupMenuButton(
+                    icon: Icon(Icons.more_vert, size: 20, color: theme.disabledColor),
+                    padding: EdgeInsets.zero,
                     itemBuilder: (context) => [
                       const PopupMenuItem(
                         value: 'delete',
                         child: Row(
                           children: [
-                            Icon(Icons.delete, color: Colors.red),
+                            Icon(Icons.delete_outline, color: Colors.red, size: 20),
                             SizedBox(width: 8),
-                            Text('Удалить'),
+                            Text('Удалить', style: TextStyle(color: Colors.red)),
                           ],
                         ),
                       ),
                     ],
                     onSelected: (value) {
-                      if (value == 'delete') {
-                        onDelete();
-                      }
+                      if (value == 'delete') onDelete();
                     },
                   ),
                 ],
               ),
-              if (lecture.subject != null || lecture.groupName != null) ...[
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 4,
-                  children: [
-                    if (lecture.subject != null && lecture.subject!.isNotEmpty)
-                      Chip(
-                        label: Text(lecture.subject!, style: const TextStyle(fontSize: 11)),
-                        padding: EdgeInsets.zero,
-                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        visualDensity: VisualDensity.compact,
-                      ),
-                    if (lecture.groupName != null && lecture.groupName!.isNotEmpty)
-                      Chip(
-                        label: Text(lecture.groupName!, style: const TextStyle(fontSize: 11)),
-                        padding: EdgeInsets.zero,
-                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        visualDensity: VisualDensity.compact,
-                      ),
-                  ],
-                ),
-              ],
-              const SizedBox(height: 8),
+              const SizedBox(height: 12),
               Row(
                 children: [
                   _StatusChip(status: lecture.status),
-                  const SizedBox(width: 8),
-                  Icon(
-                    Icons.access_time,
-                    size: 16,
-                    color: colorScheme.onSurfaceVariant,
-                  ),
+                  const Spacer(),
+                  Icon(Icons.access_time, size: 14, color: theme.disabledColor),
                   const SizedBox(width: 4),
                   Text(
                     lecture.durationText,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
-                    ),
+                    style: theme.textTheme.bodySmall,
                   ),
-                  if (lecture.language != null) ...[
-                    const SizedBox(width: 12),
-                    Icon(
-                      Icons.language,
-                      size: 16,
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      lecture.language!.toUpperCase(),
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
                 ],
               ),
-              if (lecture.isReady) ...[
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    if (lecture.hasTranscript)
-                      _FeatureChip(
-                        icon: Icons.text_snippet,
-                        label: 'Транскрипт',
-                      ),
-                    if (lecture.hasSummary) ...[
-                      const SizedBox(width: 8),
-                      _FeatureChip(
-                        icon: Icons.summarize,
-                        label: 'Конспект',
-                      ),
-                    ],
-                  ],
-                ),
-              ],
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _StatusChip extends StatelessWidget {
-  final String status;
-
-  const _StatusChip({required this.status});
-
-  @override
-  Widget build(BuildContext context) {
-    Color color;
-    IconData icon;
-
-    switch (status) {
-      case 'completed':
-        color = Colors.green;
-        icon = Icons.check_circle;
-        break;
-      case 'processing':
-        color = Colors.orange;
-        icon = Icons.hourglass_top;
-        break;
-      case 'failed':
-        color = Colors.red;
-        icon = Icons.error;
-        break;
-      default:
-        color = Colors.grey;
-        icon = Icons.schedule;
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: color),
-          const SizedBox(width: 4),
-          Text(
-            _statusText(status),
-            style: TextStyle(
-              fontSize: 12,
-              color: color,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _statusText(String status) {
-    switch (status) {
-      case 'completed':
-        return 'Готово';
-      case 'processing':
-        return 'Обработка';
-      case 'failed':
-        return 'Ошибка';
-      default:
-        return 'Ожидание';
-    }
-  }
-}
-
-class _FeatureChip extends StatelessWidget {
-  final IconData icon;
-  final String label;
-
-  const _FeatureChip({
-    required this.icon,
-    required this.label,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: colorScheme.primaryContainer,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: colorScheme.onPrimaryContainer),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              color: colorScheme.onPrimaryContainer,
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -943,9 +627,12 @@ class _SearchResultCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Card(
-      margin: const EdgeInsets.only(bottom: 12),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: Theme.of(context).dividerColor.withOpacity(0.5)),
+      ),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(16),
@@ -956,44 +643,18 @@ class _SearchResultCard extends StatelessWidget {
             children: [
               Text(
                 result.title,
-                style: theme.textTheme.titleMedium,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-              if (result.subject != null || result.groupName != null) ...[
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 6,
-                  children: [
-                    if (result.subject != null)
-                      Chip(
-                        label: Text(result.subject!, style: const TextStyle(fontSize: 11)),
-                        padding: EdgeInsets.zero,
-                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        visualDensity: VisualDensity.compact,
-                      ),
-                    if (result.groupName != null)
-                      Chip(
-                        label: Text(result.groupName!, style: const TextStyle(fontSize: 11)),
-                        padding: EdgeInsets.zero,
-                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        visualDensity: VisualDensity.compact,
-                      ),
-                  ],
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
                 ),
-              ],
-              if (result.snippet != null && result.snippet!.isNotEmpty) ...[
-                const SizedBox(height: 8),
+              ),
+              const SizedBox(height: 8),
+              if (result.snippet != null)
                 Text(
-                  result.snippet!,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                    fontStyle: FontStyle.italic,
-                  ),
+                  '...${result.snippet}...',
+                  style: Theme.of(context).textTheme.bodySmall,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
-              ],
             ],
           ),
         ),
@@ -1002,35 +663,69 @@ class _SearchResultCard extends StatelessWidget {
   }
 }
 
-class _DrawerAvatar extends StatelessWidget {
-  final String? photoUrl;
-
-  const _DrawerAvatar({this.photoUrl});
+class _StatusChip extends StatelessWidget {
+  final String status;
+  const _StatusChip({required this.status});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return CircleAvatar(
-      radius: 28,
-      backgroundColor: theme.colorScheme.primaryContainer,
-      backgroundImage: photoUrl != null && photoUrl!.isNotEmpty
-          ? NetworkImage(photoUrl!)
-          : null,
-      child: photoUrl == null || photoUrl!.isEmpty
-          ? Icon(
-              Icons.person,
-              size: 32,
-              color: theme.colorScheme.onPrimaryContainer,
-            )
-          : null,
+    Color color;
+    String text;
+
+    switch (status) {
+      case 'processing':
+        color = Colors.orange;
+        text = 'Обработка';
+        break;
+      case 'ready':
+        color = Colors.green;
+        text = 'Готово';
+        break;
+      case 'failed':
+        color = Colors.red;
+        text = 'Ошибка';
+        break;
+      default:
+        color = Colors.grey;
+        text = 'Ожидание';
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            text,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: color,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
 class _UploadTasksSection extends StatelessWidget {
   final List<UploadTask> tasks;
-  final void Function(UploadTask) onRetry;
-  final void Function(UploadTask) onDismiss;
+  final Function(String) onRetry;
+  final Function(String) onDismiss;
 
   const _UploadTasksSection({
     required this.tasks,
@@ -1040,53 +735,28 @@ class _UploadTasksSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      elevation: 1,
-      child: SafeArea(
-        bottom: false,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-              child: Text(
-                'Загрузки',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-            ...tasks.map((task) => _UploadTaskCard(
-                  task: task,
-                  onRetry: () => onRetry(task),
-                  onDismiss: () => onDismiss(task),
-                )),
-            const SizedBox(height: 8),
-          ],
-        ),
+    return Container(
+      color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.3),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: tasks.map((task) => _UploadTaskTile(
+          task: task,
+          onRetry: () => onRetry(task.id),
+          onDismiss: () => onDismiss(task.id),
+        )).toList(),
       ),
     );
   }
 }
 
-String _processingStatusText(UploadTask task) {
-  if (task.processingStartedAt == null) return 'Обработка на сервере...';
-  final elapsed = DateTime.now().difference(task.processingStartedAt!);
-  final m = elapsed.inMinutes;
-  final s = elapsed.inSeconds.remainder(60);
-  if (m > 0) {
-    return 'Обработка... $m:${s.toString().padLeft(2, '0')}';
-  }
-  return 'Обработка... ${s} сек';
-}
-
-class _UploadTaskCard extends StatelessWidget {
+class _UploadTaskTile extends StatelessWidget {
   final UploadTask task;
   final VoidCallback onRetry;
   final VoidCallback onDismiss;
 
-  const _UploadTaskCard({
+  const _UploadTaskTile({
     required this.task,
     required this.onRetry,
     required this.onDismiss,
@@ -1094,81 +764,44 @@ class _UploadTaskCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final title = task.title?.isNotEmpty == true ? task.title! : 'Без названия';
-
     return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    title,
-                    style: theme.textTheme.titleSmall,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                if (task.isFailed)
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        title: Text(task.title ?? 'Загрузка...', maxLines: 1, overflow: TextOverflow.ellipsis),
+        subtitle: task.error != null
+            ? Text(task.error!, style: const TextStyle(color: Colors.red, fontSize: 12))
+            : LinearProgressIndicator(value: task.progress),
+        trailing: task.error != null
+            ? Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
                   IconButton(
-                    icon: const Icon(Icons.close, size: 20),
+                    icon: const Icon(Icons.refresh, color: Colors.blue),
+                    onPressed: onRetry,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
                     onPressed: onDismiss,
-                    tooltip: 'Убрать из списка',
                   ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            if (task.isUploading) ...[
-              LinearProgressIndicator(value: task.uploadProgress),
-              const SizedBox(height: 4),
-              Text(
-                'Загрузка ${task.uploadPercent}%',
-                style: theme.textTheme.bodySmall,
-              ),
-            ] else if (task.isProcessing) ...[
-              LinearProgressIndicator(
-                value: task.processingProgress != null ? task.processingProgress : null,
-              ),
-              const SizedBox(height: 4),
-              Text(
-                task.processingPercent != null
-                    ? 'Обработка ${task.processingPercent}%'
-                    : _processingStatusText(task),
-                style: theme.textTheme.bodySmall,
-              ),
-              if (task.processingPercent == null) ...[
-                const SizedBox(height: 2),
-                Text(
-                  'Обычно 1–3 минуты',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                    fontSize: 11,
-                  ),
-                ),
-              ],
-            ] else if (task.isFailed) ...[
-              Text(
-                task.errorMessage ?? 'Ошибка',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.error,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 8),
-              FilledButton.tonal(
-                onPressed: onRetry,
-                child: const Text('Повторить'),
-              ),
-            ],
-          ],
-        ),
+                ],
+              )
+            : null,
       ),
+    );
+  }
+}
+
+class _DrawerAvatar extends StatelessWidget {
+  final String? photoUrl;
+  const _DrawerAvatar({this.photoUrl});
+
+  @override
+  Widget build(BuildContext context) {
+    return CircleAvatar(
+      radius: 20,
+      backgroundImage: photoUrl != null ? NetworkImage(photoUrl!) : null,
+      child: photoUrl == null ? const Icon(Icons.person) : null,
     );
   }
 }

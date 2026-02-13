@@ -43,7 +43,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         email: res.email,
       );
       if (!mounted) return;
-      Navigator.pushReplacementNamed(context, AppRoutes.lectures);
+      Navigator.pushReplacementNamed(context, AppRoutes.main);
     } catch (e) {
       if (!mounted) return;
       setState(() {
