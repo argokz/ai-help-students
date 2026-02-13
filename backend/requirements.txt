@@ -12,7 +12,7 @@ sentence-transformers==2.3.1
 
 # LLM
 google-generativeai==0.8.0
-openai==1.12.0  # optional, for OpenAI support
+openai>=1.12.0  # optional, for OpenAI support (updated to match installed version)
 
 # Task queue
 celery==5.3.6

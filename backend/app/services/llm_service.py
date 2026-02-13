@@ -8,6 +8,8 @@ from abc import ABC, abstractmethod
 from ..config import settings
 from ..models.chat import ChatMessage
 
+logger = logging.getLogger(__name__)
+
 
 # System prompts
 RAG_SYSTEM_PROMPT = """Ты — умный ассистент для студентов, который отвечает на вопросы ТОЛЬКО на основе предоставленного контекста из лекции.
@@ -90,18 +92,26 @@ class BaseLLMProvider(ABC):
 class GeminiProvider(BaseLLMProvider):
     """Google Gemini API provider."""
     
-    def __init__(self):
+    def __init__(self, model_name: str):
+        self.model_name = model_name
         self._model = None
+        self._genai_configured = False
+    
+    def _ensure_configured(self):
+        """Ensure Gemini API is configured."""
+        if not self._genai_configured:
+            import google.generativeai as genai
+            genai.configure(api_key=settings.gemini_api_key)
+            self._genai_configured = True
     
     @property
     def model(self):
         """Lazy load Gemini model."""
         if self._model is None:
             import google.generativeai as genai
-            
-            genai.configure(api_key=settings.gemini_api_key)
+            self._ensure_configured()
             self._model = genai.GenerativeModel(
-                model_name=settings.gemini_model,
+                model_name=self.model_name,
                 generation_config={
                     "temperature": 0.3,
                     "max_output_tokens": 2000,
@@ -120,6 +130,8 @@ class GeminiProvider(BaseLLMProvider):
     ) -> str:
         """Generate response using Gemini."""
         import google.generativeai as genai
+        
+        self._ensure_configured()
         
         # Build the full prompt
         full_prompt = f"{system_prompt}\n\nПользователь: {user_message}"
@@ -157,7 +169,8 @@ class GeminiProvider(BaseLLMProvider):
 class OpenAIProvider(BaseLLMProvider):
     """OpenAI API provider."""
     
-    def __init__(self):
+    def __init__(self, model_name: str):
+        self.model_name = model_name
         self._client = None
     
     @property
@@ -165,7 +178,32 @@ class OpenAIProvider(BaseLLMProvider):
         """Lazy load OpenAI client."""
         if self._client is None:
             from openai import AsyncOpenAI
-            self._client = AsyncOpenAI(api_key=settings.openai_api_key)
+            import os
+            
+            # В версии openai 1.86.0 может быть проблема с автоматической передачей proxies
+            # из переменных окружения. Временно убираем их при создании клиента
+            old_http_proxy = os.environ.pop('HTTP_PROXY', None)
+            old_https_proxy = os.environ.pop('HTTPS_PROXY', None)
+            old_http_proxy_lower = os.environ.pop('http_proxy', None)
+            old_https_proxy_lower = os.environ.pop('https_proxy', None)
+            
+            try:
+                # Создаём клиент только с api_key
+                self._client = AsyncOpenAI(api_key=settings.openai_api_key)
+                logger.debug(f"OpenAI client created successfully for model: {self.model_name}")
+            except TypeError as e:
+                logger.error(f"Error creating OpenAI client: {e}")
+                raise
+            finally:
+                # Восстанавливаем переменные окружения
+                if old_http_proxy:
+                    os.environ['HTTP_PROXY'] = old_http_proxy
+                if old_https_proxy:
+                    os.environ['HTTPS_PROXY'] = old_https_proxy
+                if old_http_proxy_lower:
+                    os.environ['http_proxy'] = old_http_proxy_lower
+                if old_https_proxy_lower:
+                    os.environ['https_proxy'] = old_https_proxy_lower
         return self._client
     
     async def generate(
@@ -190,7 +228,7 @@ class OpenAIProvider(BaseLLMProvider):
         messages.append({"role": "user", "content": user_message})
         
         kwargs = {
-            "model": settings.openai_model,
+            "model": self.model_name,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
@@ -199,43 +237,223 @@ class OpenAIProvider(BaseLLMProvider):
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
         
-        response = await self.client.chat.completions.create(**kwargs)
-        return response.choices[0].message.content
+        try:
+            response = await self.client.chat.completions.create(**kwargs)
+            return response.choices[0].message.content
+        except Exception as e:
+            # Пробрасываем исключение с информацией о модели для лучшей диагностики
+            error_msg = f"OpenAI API error for model '{self.model_name}': {str(e)}"
+            logger.error(error_msg)
+            raise Exception(error_msg) from e
 
 
 class LLMService:
     """
-    LLM service with support for multiple providers.
+    LLM service with support for multiple providers and automatic fallback.
     
-    Supports: Gemini (default), OpenAI
+    Supports: Gemini, OpenAI with model fallback and provider fallback.
     """
     
     def __init__(self):
         self._provider: Optional[BaseLLMProvider] = None
+        self._cached_provider: Optional[BaseLLMProvider] = None
+        self._cached_model_name: Optional[str] = None
+        self._cached_provider_type: Optional[str] = None  # "gemini" or "openai"
+        
+        # Parse model lists
+        gemini_models_str = settings.gemini_models or ""
+        openai_models_str = settings.openai_models or ""
+        
+        self.gemini_models = [m.strip() for m in gemini_models_str.split(",") if m.strip()]
+        self.openai_models = [m.strip() for m in openai_models_str.split(",") if m.strip()]
+        
+        # Fallback to single model if lists are empty
+        if not self.gemini_models:
+            if settings.gemini_model:
+                self.gemini_models = [settings.gemini_model]
+            else:
+                self.gemini_models = ["gemini-2.5-flash"]  # Ultimate fallback
+                logger.warning("No Gemini models configured, using default: gemini-2.5-flash")
+        
+        if not self.openai_models:
+            if settings.openai_model:
+                self.openai_models = [settings.openai_model]
+            else:
+                self.openai_models = ["gpt-4o-mini"]  # Ultimate fallback
+                logger.warning("No OpenAI models configured, using default: gpt-4o-mini")
+        
+        # Проверяем наличие API ключей
+        if not settings.openai_api_key:
+            logger.warning("OPENAI_API_KEY not set, OpenAI models will not work")
+        if not settings.gemini_api_key:
+            logger.warning("GEMINI_API_KEY not set, Gemini models will not work")
+        
+        logger.info(f"Initialized LLM service: priority={settings.ai_priority}, gemini_models={self.gemini_models}, openai_models={self.openai_models}")
+    
+    async def _try_provider(self, provider_type: str, model_name: str, system_prompt: str, user_message: str, **kwargs) -> tuple[bool, Optional[str]]:
+        """Try to generate with specific provider and model. Returns (success, response)."""
+        try:
+            if provider_type == "gemini":
+                provider = GeminiProvider(model_name)
+            elif provider_type == "openai":
+                provider = OpenAIProvider(model_name)
+            else:
+                return False, None
+            
+            response = await provider.generate(
+                system_prompt=system_prompt,
+                user_message=user_message,
+                **kwargs
+            )
+            return True, response
+        except Exception as e:
+            # Логируем ошибку с полными деталями для диагностики
+            error_msg = str(e)
+            error_type = type(e).__name__
+            import traceback
+            error_trace = traceback.format_exc()
+            
+            logger.warning(f"Model {model_name} ({provider_type}) failed: {error_type}: {error_msg}")
+            logger.debug(f"Full traceback for {model_name} ({provider_type}):\n{error_trace}")
+            
+            # Для критичных ошибок (API key, model not found, etc) логируем как error
+            error_lower = error_msg.lower()
+            if any(keyword in error_lower for keyword in ["api", "key", "auth", "unauthorized", "invalid", "not found", "does not exist"]):
+                logger.error(f"API error for {provider_type}/{model_name}: {error_msg}")
+            
+            return False, None
+    
+    async def _find_working_provider(
+        self,
+        system_prompt: str,
+        user_message: str,
+        **kwargs
+    ) -> tuple[BaseLLMProvider, str, str]:
+        """
+        Find working provider and model with fallback logic.
+        Returns: (provider, model_name, provider_type)
+        """
+        # If we have cached working provider, try it first
+        if self._cached_provider and self._cached_model_name and self._cached_provider_type:
+            try:
+                # Test cached provider
+                test_response = await self._cached_provider.generate(
+                    system_prompt=system_prompt,
+                    user_message=user_message,
+                    **kwargs
+                )
+                logger.debug(f"Using cached provider: {self._cached_provider_type}/{self._cached_model_name}")
+                return self._cached_provider, self._cached_model_name, self._cached_provider_type
+            except Exception as e:
+                logger.warning(f"Cached provider {self._cached_provider_type}/{self._cached_model_name} failed: {e}, searching for new one")
+                self._cached_provider = None
+                self._cached_model_name = None
+                self._cached_provider_type = None
+        
+        # Determine priority order
+        priority = settings.ai_priority.lower()
+        if priority not in ["gemini", "gpt"]:
+            priority = "gemini"  # Default to gemini
+        
+        # Try priority provider first
+        if priority == "gpt":
+            # Try OpenAI models first
+            for model in self.openai_models:
+                success, response = await self._try_provider("openai", model, system_prompt, user_message, **kwargs)
+                if success:
+                    provider = OpenAIProvider(model)
+                    self._cached_provider = provider
+                    self._cached_model_name = model
+                    self._cached_provider_type = "openai"
+                    logger.info(f"Selected working model: openai/{model}")
+                    return provider, model, "openai"
+            
+            # If all OpenAI models failed, try Gemini
+            logger.info("All OpenAI models failed, trying Gemini...")
+            for model in self.gemini_models:
+                success, response = await self._try_provider("gemini", model, system_prompt, user_message, **kwargs)
+                if success:
+                    provider = GeminiProvider(model)
+                    self._cached_provider = provider
+                    self._cached_model_name = model
+                    self._cached_provider_type = "gemini"
+                    logger.info(f"Selected working model: gemini/{model}")
+                    return provider, model, "gemini"
+        else:
+            # Try Gemini models first
+            for model in self.gemini_models:
+                success, response = await self._try_provider("gemini", model, system_prompt, user_message, **kwargs)
+                if success:
+                    provider = GeminiProvider(model)
+                    self._cached_provider = provider
+                    self._cached_model_name = model
+                    self._cached_provider_type = "gemini"
+                    logger.info(f"Selected working model: gemini/{model}")
+                    return provider, model, "gemini"
+            
+            # If all Gemini models failed, try OpenAI
+            logger.info("All Gemini models failed, trying OpenAI...")
+            for model in self.openai_models:
+                success, response = await self._try_provider("openai", model, system_prompt, user_message, **kwargs)
+                if success:
+                    provider = OpenAIProvider(model)
+                    self._cached_provider = provider
+                    self._cached_model_name = model
+                    self._cached_provider_type = "openai"
+                    logger.info(f"Selected working model: openai/{model}")
+                    return provider, model, "openai"
+        
+        # If all models failed, raise error
+        raise RuntimeError("All LLM models are unavailable. Check API keys and model availability.")
     
     @property
-    def provider(self) -> BaseLLMProvider:
-        """Get the configured LLM provider."""
+    async def provider(self) -> BaseLLMProvider:
+        """Get the configured LLM provider (async to support fallback)."""
+        # For backward compatibility, return cached or create default
         if self._provider is None:
             if settings.llm_provider == "gemini":
-                self._provider = GeminiProvider()
+                if self.gemini_models:
+                    self._provider = GeminiProvider(self.gemini_models[0])
+                else:
+                    self._provider = GeminiProvider(settings.gemini_model)
             elif settings.llm_provider == "openai":
-                self._provider = OpenAIProvider()
+                if self.openai_models:
+                    self._provider = OpenAIProvider(self.openai_models[0])
+                else:
+                    self._provider = OpenAIProvider(settings.openai_model)
             else:
                 raise ValueError(f"Unknown LLM provider: {settings.llm_provider}")
         return self._provider
     
+    async def get_provider_with_fallback(
+        self,
+        system_prompt: str,
+        user_message: str,
+        **kwargs
+    ) -> BaseLLMProvider:
+        """Get provider with automatic fallback."""
+        provider, model_name, provider_type = await self._find_working_provider(
+            system_prompt, user_message, **kwargs
+        )
+        return provider
+    
     def get_provider_info(self) -> dict:
-        """Get information about the current provider."""
+        """Get information about the current/cached provider."""
+        if self._cached_provider_type and self._cached_model_name:
+            return {
+                "provider": self._cached_provider_type,
+                "model": self._cached_model_name,
+            }
+        # Fallback to settings
         if settings.llm_provider == "gemini":
             return {
                 "provider": "gemini",
-                "model": settings.gemini_model,
+                "model": self.gemini_models[0] if self.gemini_models else settings.gemini_model,
             }
         else:
             return {
                 "provider": "openai",
-                "model": settings.openai_model,
+                "model": self.openai_models[0] if self.openai_models else settings.openai_model,
             }
     
     async def generate_answer(
@@ -258,7 +476,14 @@ class LLMService:
         system_prompt = RAG_SYSTEM_PROMPT.format(context=context)
         
         try:
-            answer = await self.provider.generate(
+            provider = await self.get_provider_with_fallback(
+                system_prompt=system_prompt,
+                user_message=question,
+                history=history,
+                temperature=0.3,
+                max_tokens=1000,
+            )
+            answer = await provider.generate(
                 system_prompt=system_prompt,
                 user_message=question,
                 history=history,
@@ -285,7 +510,14 @@ class LLMService:
         """Ответ на вопрос по контексту из нескольких лекций (с указанием источников)."""
         system_prompt = RAG_GLOBAL_SYSTEM_PROMPT.format(context=context)
         try:
-            return await self.provider.generate(
+            provider = await self.get_provider_with_fallback(
+                system_prompt=system_prompt,
+                user_message=question,
+                history=history,
+                temperature=0.3,
+                max_tokens=1200,
+            )
+            return await provider.generate(
                 system_prompt=system_prompt,
                 user_message=question,
                 history=history,
@@ -333,7 +565,14 @@ class LLMService:
         user_message = f"Создай конспект следующей лекции:\n\n{text}"
         
         try:
-            content = await self.provider.generate(
+            provider = await self.get_provider_with_fallback(
+                system_prompt=SUMMARY_SYSTEM_PROMPT,
+                user_message=user_message,
+                temperature=0.2,
+                max_tokens=3000,
+                json_mode=True,
+            )
+            content = await provider.generate(
                 system_prompt=SUMMARY_SYSTEM_PROMPT,
                 user_message=user_message,
                 temperature=0.2,
@@ -385,7 +624,14 @@ class LLMService:
         for i, chunk in enumerate(adjusted_chunks):
             try:
                 user_message = f"Проанализируй эту часть лекции (часть {i+1} из {len(adjusted_chunks)}):\n\n{chunk}"
-                content = await self.provider.generate(
+                provider = await self.get_provider_with_fallback(
+                    system_prompt=SUMMARY_CHUNK_PROMPT,
+                    user_message=user_message,
+                    temperature=0.2,
+                    max_tokens=2000,
+                    json_mode=True,
+                )
+                content = await provider.generate(
                     system_prompt=SUMMARY_CHUNK_PROMPT,
                     user_message=user_message,
                     temperature=0.2,
@@ -448,7 +694,14 @@ class LLMService:
     "detailed_summary": "..."
 }}"""
             
-            final_content = await self.provider.generate(
+            provider = await self.get_provider_with_fallback(
+                system_prompt="Ты создаёшь финальные резюме лекции. Верни ТОЛЬКО валидный JSON.",
+                user_message=final_prompt,
+                temperature=0.2,
+                max_tokens=2000,
+                json_mode=True,
+            )
+            final_content = await provider.generate(
                 system_prompt="Ты создаёшь финальные резюме лекции. Верни ТОЛЬКО валидный JSON.",
                 user_message=final_prompt,
                 temperature=0.2,

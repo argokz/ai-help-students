@@ -159,8 +159,16 @@ class TaskExtractor:
         )
         
         try:
-            response = await llm_service.provider.generate(
-                system_prompt="Ты анализируешь транскрипцию лекции и извлекаешь задания. Верни ТОЛЬКО валидный JSON.",
+            system_prompt = "Ты анализируешь транскрипцию лекции и извлекаешь задания. Верни ТОЛЬКО валидный JSON."
+            provider = await llm_service.get_provider_with_fallback(
+                system_prompt=system_prompt,
+                user_message=prompt,
+                temperature=0.2,
+                max_tokens=2000,
+                json_mode=True,
+            )
+            response = await provider.generate(
+                system_prompt=system_prompt,
                 user_message=prompt,
                 temperature=0.2,
                 max_tokens=2000,
@@ -176,9 +184,36 @@ class TaskExtractor:
                 response_text = response_text.replace('```json', '').replace('```', '').strip()
             
             import json
-            result = json.loads(response_text)
-            tasks = result.get('tasks', [])
-            return tasks
+            try:
+                result = json.loads(response_text)
+                tasks = result.get('tasks', [])
+                return tasks
+            except json.JSONDecodeError as json_err:
+                logger.warning(f"JSON parse error in chunk {chunk_id}: {json_err}")
+                logger.debug(f"Response text (first 500 chars): {response_text[:500]}")
+                
+                # Попытка исправить распространённые проблемы с JSON
+                try:
+                    # 1. Ищем последний валидный JSON объект (до ошибки)
+                    error_pos = json_err.pos if hasattr(json_err, 'pos') else len(response_text)
+                    # Пробуем найти последнюю закрывающую скобку до ошибки
+                    truncated = response_text[:error_pos]
+                    last_brace = truncated.rfind('}')
+                    if last_brace > 0:
+                        # Находим начало объекта
+                        first_brace = truncated.rfind('{', 0, last_brace)
+                        if first_brace >= 0:
+                            json_part = truncated[first_brace:last_brace+1]
+                            result = json.loads(json_part)
+                            tasks = result.get('tasks', [])
+                            logger.info(f"Recovered {len(tasks)} tasks from truncated JSON in chunk {chunk_id}")
+                            return tasks
+                except Exception as recover_err:
+                    logger.debug(f"Could not recover JSON: {recover_err}")
+                
+                # Если не получилось исправить, возвращаем пустой список
+                logger.error(f"Could not parse JSON from chunk {chunk_id}, returning empty tasks")
+                return []
             
         except Exception as e:
             logger.warning(f"Error extracting tasks from chunk {chunk_id}: {e}")

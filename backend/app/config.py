@@ -39,15 +39,20 @@ class Settings(BaseSettings):
     embedding_model: str = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
     
     # LLM settings
-    llm_provider: str = "gemini"  # "gemini" or "openai"
+    llm_provider: str = "gemini"  # "gemini" or "openai" (deprecated, use ai_priority)
+    
+    # AI Priority: "gemini" or "gpt" - какой провайдер использовать в первую очередь
+    ai_priority: str = "gemini"
     
     # Gemini settings
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-2.5-flash"  # Deprecated, use gemini_models
+    gemini_models: str = "gemini-2.5-flash"  # Список моделей через запятую для fallback
     
     # OpenAI settings (optional)
     openai_api_key: str = ""
-    openai_model: str = "gpt-4o-mini"
+    openai_model: str = "gpt-4o-mini"  # Deprecated, use openai_models
+    openai_models: str = "gpt-4o-mini"  # Список моделей через запятую для fallback
     
     # Chunking settings
     chunk_size: int = 400  # words
