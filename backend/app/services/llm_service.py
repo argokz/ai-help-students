@@ -230,9 +230,17 @@ class OpenAIProvider(BaseLLMProvider):
         kwargs = {
             "model": self.model_name,
             "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
         }
+        
+        # Новые модели OpenAI (gpt-5-mini и др.) требуют max_completion_tokens вместо max_tokens
+        # и не поддерживают temperature (только значение по умолчанию 1)
+        # Проверяем версию модели и используем правильные параметры
+        if "gpt-5" in self.model_name.lower() or "gpt-4.5" in self.model_name.lower():
+            kwargs["max_completion_tokens"] = max_tokens
+            # Не передаем temperature для новых моделей - используется значение по умолчанию (1)
+        else:
+            kwargs["max_tokens"] = max_tokens
+            kwargs["temperature"] = temperature
         
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}

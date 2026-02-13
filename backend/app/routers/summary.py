@@ -10,6 +10,7 @@ from ..dependencies import get_current_user
 from ..models import SummaryResponse
 from ..services.llm_service import llm_service
 from ..services.storage_service import storage_service
+from ..services.lectures_repo import lectures_repo
 
 router = APIRouter()
 
@@ -27,7 +28,7 @@ async def get_summary(
     regenerate: bool = False,
 ):
     """Get structured summary. Lecture must belong to current user."""
-    lecture = await storage_service.get_lecture_metadata(lecture_id, db)
+    lecture = await lectures_repo.get(lecture_id, db)
     if not lecture:
         raise HTTPException(status_code=404, detail="Lecture not found")
     _check_lecture_owner(lecture, current_user.id)
@@ -51,5 +52,5 @@ async def get_summary(
         language=transcript.get("language"),
     )
     await storage_service.save_summary(lecture_id, summary)
-    await storage_service.update_lecture_metadata(lecture_id, {"has_summary": True}, db)
+    await lectures_repo.update(lecture_id, {"has_summary": True}, db)
     return SummaryResponse(lecture_id=lecture_id, **summary)

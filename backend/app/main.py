@@ -54,11 +54,11 @@ async def lifespan(app: FastAPI):
 async def _recover_incomplete_lectures():
     """Восстановить обработку лекций со статусом pending или processing после перезагрузки."""
     from .database import AsyncSessionLocal
-    from .services import storage_service
+    from .services.lectures_repo import lectures_repo
     from .routers.lectures import process_lecture_transcription
     
     async with AsyncSessionLocal() as db:
-        incomplete = await storage_service.get_incomplete_lectures(db)
+        incomplete = await lectures_repo.get_incomplete(db)
         
         if not incomplete:
             logger.info("No incomplete lectures to recover")
@@ -73,8 +73,8 @@ async def _recover_incomplete_lectures():
             
             if not audio_path:
                 logger.warning(f"Lecture {lecture_id} has no audio_path, marking as failed")
-                await storage_service.update_lecture_status(lecture_id, "failed", db)
-                await storage_service.update_lecture_metadata(
+                await lectures_repo.update_status(lecture_id, "failed", db)
+                await lectures_repo.update(
                     lecture_id, 
                     {"error": "Audio file path missing"}, 
                     db
@@ -85,8 +85,8 @@ async def _recover_incomplete_lectures():
             from pathlib import Path
             if not Path(audio_path).exists():
                 logger.warning(f"Audio file not found for lecture {lecture_id}: {audio_path}, marking as failed")
-                await storage_service.update_lecture_status(lecture_id, "failed", db)
-                await storage_service.update_lecture_metadata(
+                await lectures_repo.update_status(lecture_id, "failed", db)
+                await lectures_repo.update(
                     lecture_id, 
                     {"error": f"Audio file not found: {audio_path}"}, 
                     db

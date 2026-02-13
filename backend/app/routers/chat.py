@@ -11,6 +11,7 @@ from ..models import ChatRequest, ChatResponse, SourceChunk
 from ..services.llm_service import llm_service
 from ..services.storage_service import storage_service
 from ..services.vector_store import vector_store
+from ..services.lectures_repo import lectures_repo
 
 router = APIRouter()
 
@@ -28,7 +29,7 @@ async def chat_with_lecture(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Ask a question about the lecture. Lecture must belong to current user."""
-    lecture = await storage_service.get_lecture_metadata(lecture_id, db)
+    lecture = await lectures_repo.get(lecture_id, db)
     if not lecture:
         raise HTTPException(status_code=404, detail="Lecture not found")
     _check_lecture_owner(lecture, current_user.id)

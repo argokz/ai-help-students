@@ -496,7 +496,7 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
           icon: Icons.summarize,
           title: 'Конспект',
           subtitle: 'Структурированные заметки',
-          enabled: lecture.hasTranscript,
+          enabled: lecture.hasTranscript || lecture.hasSummary,
           onTap: () {
             Navigator.pushNamed(
               context,

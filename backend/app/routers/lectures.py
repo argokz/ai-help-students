@@ -350,6 +350,84 @@ async def list_lectures(
     lectures = await lectures_repo.list(
         current_user.id, db, subject=subject, group_name=group_name
     )
+    
+    # Исправляем статусы старых лекций: если есть транскрипт, но статус pending/processing - обновляем на completed
+    # Также проверяем наличие конспекта и обновляем has_summary
+    from ..services.storage_service import storage_service
+    logger = logging.getLogger(__name__)
+    
+    # Собираем все лекции, которые нужно исправить
+    # Используем словарь для быстрого поиска и избежания дубликатов
+    lectures_to_fix_dict = {}  # lecture_id -> (lecture, updates, segment_count)
+    
+    for lecture in lectures:
+        status = lecture.get("status")
+        lecture_id = lecture.get("id")
+        updates = {}
+        segment_count = 0
+        
+        # Если статус pending/processing, проверяем наличие транскрипта
+        if status in ["pending", "processing"]:
+            # Сначала проверяем наличие файла напрямую
+            transcript_path = storage_service._transcript_path(lecture_id)
+            file_exists = transcript_path.exists()
+            
+            if file_exists:
+                # Файл существует, пытаемся загрузить транскрипт
+                transcript = await storage_service.get_transcript(lecture_id)
+                
+                if transcript:
+                    # Проверяем, что транскрипт не пустой
+                    segments = transcript.get("segments", [])
+                    if segments and len(segments) > 0:
+                        # Транскрипт есть и не пустой - добавляем в список для исправления
+                        updates["status"] = "completed"
+                        updates["has_transcript"] = True
+                        updates["processing_progress"] = None
+                        segment_count = len(segments)
+                        logger.debug(f"Lecture {lecture_id} has transcript with {segment_count} segments, will fix status")
+                    else:
+                        logger.debug(f"Lecture {lecture_id} has transcript file but no segments")
+                else:
+                    logger.warning(f"Lecture {lecture_id} transcript file exists but failed to load")
+            else:
+                logger.debug(f"Lecture {lecture_id} status={status}, transcript file not found at {transcript_path}")
+        
+        # Проверяем наличие конспекта для всех лекций (независимо от статуса)
+        if not lecture.get("has_summary", False):
+            summary = await storage_service.get_summary(lecture_id)
+            if summary:
+                # Конспект существует, но флаг не установлен - обновим
+                updates["has_summary"] = True
+        
+        # Если есть обновления, добавляем в словарь
+        if updates:
+            if lecture_id in lectures_to_fix_dict:
+                # Лекция уже в словаре, объединяем обновления
+                existing_lecture, existing_updates, existing_seg_count = lectures_to_fix_dict[lecture_id]
+                existing_updates.update(updates)
+                lectures_to_fix_dict[lecture_id] = (existing_lecture, existing_updates, max(existing_seg_count, segment_count))
+            else:
+                # Новая лекция для исправления
+                lectures_to_fix_dict[lecture_id] = (lecture, updates, segment_count)
+    
+    # Преобразуем словарь в список для обработки
+    lectures_to_fix = [(lid, l, u, seg) for lid, (l, u, seg) in lectures_to_fix_dict.items()]
+    
+    # Исправляем все найденные лекции
+    if lectures_to_fix:
+        logger.info(f"Found {len(lectures_to_fix)} lectures with incorrect status/flags, fixing...")
+        for lecture_id, lecture, updates, segment_count in lectures_to_fix:
+            try:
+                old_status = lecture.get("status")
+                logger.info(f"Fixing lecture {lecture_id}: {old_status} -> {updates.get('status', old_status)} (found {segment_count} segments)")
+                await lectures_repo.update(lecture_id, updates, db)
+                # Обновляем данные в текущем списке для ответа
+                lecture.update(updates)
+                logger.info(f"Successfully fixed lecture {lecture_id}")
+            except Exception as e:
+                logger.error(f"Failed to update lecture {lecture_id}: {e}", exc_info=True)
+    
     subjects = await lectures_repo.list_subjects(current_user.id, db)
     groups = await lectures_repo.list_groups(current_user.id, db)
     return LectureListResponse(
@@ -358,6 +436,64 @@ async def list_lectures(
         subjects=subjects,
         groups=groups,
     )
+
+
+@router.post("/fix-statuses", response_model=dict)
+async def fix_lecture_statuses(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Исправить статусы всех лекций пользователя: если есть транскрипт, но статус pending/processing - обновить на completed."""
+    from ..services.storage_service import storage_service
+    logger = logging.getLogger(__name__)
+    
+    # Получаем все лекции пользователя
+    all_lectures = await lectures_repo.list(current_user.id, db)
+    
+    fixed_count = 0
+    not_found_count = 0
+    
+    for lecture in all_lectures:
+        status = lecture.get("status")
+        lecture_id = lecture.get("id")
+        
+        # Если статус pending/processing, проверяем наличие транскрипта
+        if status in ["pending", "processing"]:
+            # Проверяем наличие файла транскрипта
+            transcript_path = storage_service._transcript_path(lecture_id)
+            file_exists = transcript_path.exists()
+            
+            if file_exists:
+                # Файл существует, пытаемся загрузить транскрипт
+                transcript = await storage_service.get_transcript(lecture_id)
+                
+                if transcript:
+                    segments = transcript.get("segments", [])
+                    if segments and len(segments) > 0:
+                        # Транскрипт есть и не пустой - исправляем статус
+                        try:
+                            await lectures_repo.update(
+                                lecture_id,
+                                {
+                                    "status": "completed",
+                                    "has_transcript": True,
+                                    "processing_progress": None,
+                                },
+                                db,
+                            )
+                            fixed_count += 1
+                            logger.info(f"Fixed status for lecture {lecture_id}: {status} -> completed")
+                        except Exception as e:
+                            logger.error(f"Failed to update status for lecture {lecture_id}: {e}", exc_info=True)
+            else:
+                not_found_count += 1
+    
+    return {
+        "message": f"Status fix completed",
+        "fixed": fixed_count,
+        "not_found": not_found_count,
+        "total_checked": len(all_lectures),
+    }
 
 
 @router.get("/search", response_model=LectureSearchResponse)

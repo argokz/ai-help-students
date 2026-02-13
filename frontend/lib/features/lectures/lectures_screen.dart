@@ -678,7 +678,11 @@ class _StatusChip extends StatelessWidget {
         color = Colors.orange;
         text = 'Обработка';
         break;
-      case 'ready':
+      case 'completed':
+        color = Colors.green;
+        text = 'Готово';
+        break;
+      case 'ready': // Для обратной совместимости
         color = Colors.green;
         text = 'Готово';
         break;
