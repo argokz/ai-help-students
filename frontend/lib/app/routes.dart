@@ -14,6 +14,8 @@ import '../features/notes/notes_screen.dart';
 import '../features/notes/note_detail_screen.dart';
 import '../features/calendar/calendar_screen.dart';
 import '../features/calendar/calendar_event_detail_screen.dart';
+import '../features/tasks/tasks_screen.dart';
+import '../features/tasks/task_detail_screen.dart';
 import '../features/main/main_screen.dart';
 
 class AppRoutes {

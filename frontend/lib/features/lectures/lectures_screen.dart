@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../../models/lecture.dart' show Lecture, LectureSearchResult;
+import '../../models/upload_task.dart' show UploadTask;
 import '../../data/api_client.dart';
 import '../../data/auth_repository.dart';
 import '../../data/upload_queue.dart';
@@ -728,8 +729,8 @@ class _StatusChip extends StatelessWidget {
 
 class _UploadTasksSection extends StatelessWidget {
   final List<UploadTask> tasks;
-  final Function(String) onRetry;
-  final Function(String) onDismiss;
+  final void Function(UploadTask) onRetry;
+  final void Function(UploadTask) onDismiss;
 
   const _UploadTasksSection({
     required this.tasks,
@@ -747,8 +748,8 @@ class _UploadTasksSection extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: tasks.map((task) => _UploadTaskTile(
           task: task,
-          onRetry: () => onRetry(task.id),
-          onDismiss: () => onDismiss(task.id),
+          onRetry: () => onRetry(task),
+          onDismiss: () => onDismiss(task),
         )).toList(),
       ),
     );
@@ -773,10 +774,10 @@ class _UploadTaskTile extends StatelessWidget {
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
         title: Text(task.title ?? 'Загрузка...', maxLines: 1, overflow: TextOverflow.ellipsis),
-        subtitle: task.error != null
-            ? Text(task.error!, style: const TextStyle(color: Colors.red, fontSize: 12))
-            : LinearProgressIndicator(value: task.progress),
-        trailing: task.error != null
+        subtitle: task.errorMessage != null
+            ? Text(task.errorMessage!, style: const TextStyle(color: Colors.red, fontSize: 12))
+            : LinearProgressIndicator(value: task.isProcessing && task.processingProgress != null ? task.processingProgress : task.uploadProgress),
+        trailing: task.errorMessage != null
             ? Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [

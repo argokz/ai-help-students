@@ -23,6 +23,32 @@ class Task {
     required this.updatedAt,
   });
 
+  Task copyWith({
+    String? id,
+    String? title,
+    String? description,
+    bool? isCompleted,
+    DateTime? completedAt,
+    DateTime? dueDate,
+    String? priority,
+    String? lectureId,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) {
+    return Task(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      description: description ?? this.description,
+      isCompleted: isCompleted ?? this.isCompleted,
+      completedAt: completedAt ?? this.completedAt,
+      dueDate: dueDate ?? this.dueDate,
+      priority: priority ?? this.priority,
+      lectureId: lectureId ?? this.lectureId,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
+
   factory Task.fromJson(Map<String, dynamic> json) {
     return Task(
       id: json['id'],
